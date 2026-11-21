@@ -14,6 +14,8 @@ import com.example.data.local.Expense
 import com.example.data.local.HeldSale
 import com.example.data.local.HeldSaleItem
 import com.example.data.local.Product
+import com.example.data.local.Quote
+import com.example.data.local.QuoteItem
 import com.example.data.local.Sale
 import com.example.data.local.SaleItem
 import com.example.data.local.User
@@ -22,7 +24,12 @@ import com.example.data.local.PurchaseInvoice
 import com.example.data.repository.AppRepository
 import com.example.data.repository.GeminiRepository
 import com.example.data.repository.CloudSyncRepository
+import com.example.data.repository.FirestoreSyncRepository
 import com.example.ui.assistant.*
+import com.example.utils.GeminiLiveCallbacks
+import com.example.utils.GeminiLiveManager
+import com.example.utils.GeminiLiveStatus
+import com.example.utils.SpeechToTextManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,11 +42,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.util.Calendar
+import java.util.Locale
 
 class PosViewModel(
     private val repository: AppRepository,
     private val geminiRepository: GeminiRepository,
-    private val cloudSyncRepository: CloudSyncRepository
+    private val cloudSyncRepository: CloudSyncRepository,
+    private val firestoreSyncRepository: FirestoreSyncRepository
 ) : ViewModel() {
 
     val prefs = repository.prefs
@@ -56,6 +65,7 @@ class PosViewModel(
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allHeldSales = repository.allHeldSales.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allDeliveryNotes = repository.allDeliveryNotes.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val allQuotes = repository.allQuotes.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allExpenses = repository.allExpenses.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _currentUser = MutableStateFlow<User?>(null)
@@ -66,6 +76,12 @@ class PosViewModel(
 
     private val _cart = MutableStateFlow<List<CartItem>>(emptyList())
     val cart = _cart.asStateFlow()
+
+    private val _quoteCart = MutableStateFlow<List<CartItem>>(emptyList())
+    val quoteCart = _quoteCart.asStateFlow()
+
+    private val _posPrefillCustomer = MutableStateFlow<Pair<String, String>?>(null)
+    val posPrefillCustomer = _posPrefillCustomer.asStateFlow()
 
     private val _voiceStatus = MutableStateFlow("")
     val voiceStatus = _voiceStatus.asStateFlow()
@@ -78,12 +94,12 @@ class PosViewModel(
             AssistantChatMessage(
                 sender = AssistantSender.ASSISTANT,
                 text = "¡Hola! Soy tu asistente inteligente POS. Puedo ayudarte a:\n" +
-                        "• Consultar existencias y precios del inventario\n" +
-                        "• Registrar nuevos productos o recetas\n" +
-                        "• Añadir existencias a productos existentes\n" +
-                        "• Registrar facturas de compras a proveedores\n" +
-                        "• Consultar la tasa BCV y resumen de ventas\n\n" +
-                        "Antes de realizar cualquier cambio, te pediré confirmación con 'Sí' o 'No' para evitar errores. ¿Qué deseas hacer hoy?"
+                        "• Crear **Presupuestos** y generar tickets para WhatsApp\n" +
+                        "• Consultar existencias, precios y clientes\n" +
+                        "• Registrar nuevos productos, gastos o facturas de proveedor\n" +
+                        "• Añadir existencias o actualizar la tasa BCV\n" +
+                        "• Activar **Gemini Live** (botón superior) para hablar fluido y corregir en tiempo real\n\n" +
+                        "Antes de aplicar cambios, te pediré confirmación con 'Sí' o 'No'. ¿Qué deseas hacer hoy?"
             )
         )
     )
@@ -104,6 +120,34 @@ class PosViewModel(
     private val _geminiSelectedModel = MutableStateFlow(prefs.geminiSelectedModel)
     val geminiSelectedModel = _geminiSelectedModel.asStateFlow()
 
+    // --- GEMINI LIVE & FLUID CONTINUOUS VOICE ---
+    private val _isGeminiLiveActive = MutableStateFlow(false)
+    val isGeminiLiveActive = _isGeminiLiveActive.asStateFlow()
+
+    private val _geminiLiveStatus = MutableStateFlow(GeminiLiveStatus.DISCONNECTED)
+    val geminiLiveStatus = _geminiLiveStatus.asStateFlow()
+
+    private val _geminiLiveStatusText = MutableStateFlow("")
+    val geminiLiveStatusText = _geminiLiveStatusText.asStateFlow()
+
+    private val _isGeminiLiveMuted = MutableStateFlow(false)
+    val isGeminiLiveMuted = _isGeminiLiveMuted.asStateFlow()
+
+    private val _liveUserTranscript = MutableStateFlow("")
+    val liveUserTranscript = _liveUserTranscript.asStateFlow()
+
+    private val _liveModelTranscript = MutableStateFlow("")
+    val liveModelTranscript = _liveModelTranscript.asStateFlow()
+
+    private val _liveAudioLevel = MutableStateFlow(0f)
+    val liveAudioLevel = _liveAudioLevel.asStateFlow()
+
+    private val _assistantNavigationRequest = MutableStateFlow<String?>(null)
+    val assistantNavigationRequest = _assistantNavigationRequest.asStateFlow()
+
+    private var geminiLiveManager: GeminiLiveManager? = null
+    private var continuousSttManager: SpeechToTextManager? = null
+
     private val _appTheme = MutableStateFlow(prefs.appTheme)
     val appTheme = _appTheme.asStateFlow()
 
@@ -121,6 +165,54 @@ class PosViewModel(
     val isGoogleSignedIn: StateFlow<Boolean> = combine(_backupMode, _googleAccount) { mode, account ->
         mode == "GOOGLE_CLOUD" && account.isNotBlank()
     }.stateIn(viewModelScope, SharingStarted.Eagerly, prefs.backupMode == "GOOGLE_CLOUD" && prefs.googleAccount.isNotBlank())
+
+    private val _isGoogleAuthLoading = MutableStateFlow(false)
+    val isGoogleAuthLoading = _isGoogleAuthLoading.asStateFlow()
+
+    private val _googleAuthUserEmail = MutableStateFlow<String?>(firestoreSyncRepository.currentUserEmail)
+    val googleAuthUserEmail = _googleAuthUserEmail.asStateFlow()
+
+    val firestoreSyncError: StateFlow<String?> = firestoreSyncRepository.lastError
+
+    fun signInWithGoogle(context: Context, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isGoogleAuthLoading.value = true
+            try {
+                val helper = com.example.utils.GoogleSignInHelper(context)
+                val res = helper.signInWithGoogle()
+                res.onSuccess { email ->
+                    _googleAuthUserEmail.value = email
+                    prefs.googleAccount = email
+                    prefs.backupMode = "GOOGLE_CLOUD"
+                    _backupMode.value = "GOOGLE_CLOUD"
+                    _googleAccount.value = email
+                    firestoreSyncRepository.startSync()
+                    _isGoogleAuthLoading.value = false
+                    onResult(true, "¡Sesión iniciada con Google ($email)! Base de datos sincronizada en tiempo real con la nube.")
+                }.onFailure { err ->
+                    _isGoogleAuthLoading.value = false
+                    onResult(false, err.localizedMessage ?: "Error al iniciar sesión con Google.")
+                }
+            } catch (e: Exception) {
+                _isGoogleAuthLoading.value = false
+                onResult(false, e.localizedMessage ?: "Error desconocido en Google Sign-In.")
+            }
+        }
+    }
+
+    fun signOutGoogle(context: Context, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            val helper = com.example.utils.GoogleSignInHelper(context)
+            helper.signOut()
+            firestoreSyncRepository.stopSync()
+            _googleAuthUserEmail.value = null
+            prefs.googleAccount = ""
+            prefs.backupMode = ""
+            _backupMode.value = null
+            _googleAccount.value = ""
+            onComplete()
+        }
+    }
 
     // --- COMPANY PROFILE (REGISTRO ÚNICO) ---
     private val _isCompanyRegistered = MutableStateFlow(prefs.isCompanyRegistered)
@@ -185,6 +277,21 @@ class PosViewModel(
             return list.contains(currentReg.lowercase())
         }
         return _isCashRegisterCommissionEnabled.value
+    }
+
+    // --- OPTIONAL MINIMUM FIXED PROFIT MARGIN ---
+    private val _isMinProfitMarginEnabled = MutableStateFlow(prefs.isMinProfitMarginEnabled)
+    val isMinProfitMarginEnabled = _isMinProfitMarginEnabled.asStateFlow()
+
+    private val _minProfitMarginPercent = MutableStateFlow(prefs.minProfitMarginPercent.toDouble())
+    val minProfitMarginPercent = _minProfitMarginPercent.asStateFlow()
+
+    fun setMinProfitMarginSettings(enabled: Boolean, percent: Double) {
+        val safePercent = percent.coerceAtLeast(0.0)
+        prefs.isMinProfitMarginEnabled = enabled
+        prefs.minProfitMarginPercent = safePercent.toFloat()
+        _isMinProfitMarginEnabled.value = enabled
+        _minProfitMarginPercent.value = safePercent
     }
 
     // --- LICENSE VALIDATION WITH GOOGLE ---
@@ -432,6 +539,36 @@ class PosViewModel(
                 val result = printerManager.printUniversal(prefs, bitmap, onStatus)
                 result.onSuccess {
                     onResult(true, "¡Nota de entrega impresa exitosamente!")
+                }.onFailure { err ->
+                    onResult(false, err.message ?: "Error al imprimir en el dispositivo térmico")
+                }
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "Error al procesar impresión")
+            }
+        }
+    }
+
+    fun printQuoteTicket(
+        context: android.content.Context,
+        quote: Quote,
+        items: List<QuoteItem>,
+        onStatus: ((String) -> Unit)? = null,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        if (!isPrinterConfigured()) {
+            onResult(false, "No hay ninguna impresora configurada")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val widthLabel = if (prefs.printerPaperWidth.contains("80")) "80mm (576px)" else "58mm (384px)"
+                onStatus?.invoke("Generando presupuesto $widthLabel...")
+                val bitmap = com.example.ui.components.TicketUtils.generateQuoteTicketBitmap(context, prefs, quote, items)
+                val printerManager = com.example.utils.ThermalPrinterManager(context)
+                val result = printerManager.printUniversal(prefs, bitmap, onStatus)
+                result.onSuccess {
+                    onResult(true, "¡Presupuesto impreso exitosamente!")
                 }.onFailure { err ->
                     onResult(false, err.message ?: "Error al imprimir en el dispositivo térmico")
                 }
@@ -722,15 +859,20 @@ class PosViewModel(
 
     // --- COMPANY UNIQUE REGISTRATION ---
 
+    private fun isPlaceholderCompany(name: String, rif: String): Boolean {
+        val n = name.trim()
+        val r = rif.trim()
+        val defName = n.isBlank() || n.equals("Mi Tienda", ignoreCase = true)
+        val defRif = r.isBlank() || r.equals("J-00000000-0", ignoreCase = true) || r == "00000000"
+        return defName && defRif
+    }
+
     fun registerCompany(
         name: String,
         rif: String,
         phone: String,
         address: String
     ): Result<Unit> {
-        if (prefs.isCompanyRegistered) {
-            return Result.failure(IllegalStateException("La empresa ya fue registrada como registro único. El Nombre y RIF no pueden modificarse."))
-        }
         val cleanName = name.trim()
         val cleanRif = rif.trim().uppercase()
         val cleanPhone = phone.trim()
@@ -743,8 +885,8 @@ class PosViewModel(
             return Result.failure(IllegalArgumentException("El RIF no puede estar vacío."))
         }
 
-        val googleAcc = if (isGoogleSignedIn.value) _googleAccount.value else ""
-        val now = System.currentTimeMillis()
+        val googleAcc = if (isGoogleSignedIn.value) _googleAccount.value else (firestoreSyncRepository.currentUserEmail ?: "")
+        val now = if (prefs.companyRegisteredAt > 0L) prefs.companyRegisteredAt else System.currentTimeMillis()
 
         prefs.storeName = cleanName
         prefs.storeRif = cleanRif
@@ -762,6 +904,10 @@ class PosViewModel(
         _companyRegisteredAt.value = now
         _isCompanyRegistered.value = true
 
+        viewModelScope.launch {
+            firestoreSyncRepository.syncCompanyProfile(cleanName, cleanRif, cleanPhone, cleanAddress)
+        }
+
         // Notify server of device registration & upload full account JSON backup to cloud if linked
         if (googleAcc.isNotBlank()) {
             cloudSyncRepository.registerDeviceAndAccount(googleAcc, cleanName, cleanRif)
@@ -772,6 +918,47 @@ class PosViewModel(
         return Result.success(Unit)
     }
 
+    fun updateCompanyProfile(
+        newName: String,
+        newRif: String,
+        newPhone: String,
+        newAddress: String
+    ): Result<Unit> {
+        val cleanName = newName.trim()
+        val cleanRif = newRif.trim().uppercase()
+        val cleanPhone = newPhone.trim()
+        val cleanAddress = newAddress.trim()
+
+        if (cleanName.isBlank()) {
+            return Result.failure(IllegalArgumentException("El nombre de la empresa no puede estar vacío."))
+        }
+        if (cleanRif.isBlank()) {
+            return Result.failure(IllegalArgumentException("El RIF no puede estar vacío."))
+        }
+
+        prefs.storeName = cleanName
+        prefs.storeRif = cleanRif
+        prefs.storePhone = cleanPhone
+        prefs.storeAddress = cleanAddress
+        prefs.isCompanyRegistered = true
+
+        _storeName.value = cleanName
+        _storeRif.value = cleanRif
+        _storePhone.value = cleanPhone
+        _storeAddress.value = cleanAddress
+        _isCompanyRegistered.value = true
+
+        viewModelScope.launch {
+            firestoreSyncRepository.syncCompanyProfile(cleanName, cleanRif, cleanPhone, cleanAddress)
+        }
+
+        if (prefs.googleAccount.isNotBlank()) {
+            cloudSyncRepository.registerDeviceAndAccount(prefs.googleAccount, cleanName, cleanRif)
+            cloudSyncRepository.uploadFullAccountBackup(prefs.googleAccount)
+        }
+        return Result.success(Unit)
+    }
+
     fun updateCompanyContact(newPhone: String, newAddress: String) {
         val cleanPhone = newPhone.trim()
         val cleanAddress = newAddress.trim()
@@ -779,6 +966,9 @@ class PosViewModel(
         prefs.storeAddress = cleanAddress
         _storePhone.value = cleanPhone
         _storeAddress.value = cleanAddress
+        viewModelScope.launch {
+            firestoreSyncRepository.syncCompanyProfile(_storeName.value, _storeRif.value, cleanPhone, cleanAddress)
+        }
         if (prefs.googleAccount.isNotBlank()) {
             cloudSyncRepository.uploadFullAccountBackup(prefs.googleAccount)
         }
@@ -959,6 +1149,34 @@ class PosViewModel(
     }
 
     init {
+        if (prefs.isCompanyRegistered && isPlaceholderCompany(prefs.storeName, prefs.storeRif)) {
+            prefs.isCompanyRegistered = false
+            _isCompanyRegistered.value = false
+        }
+
+        viewModelScope.launch {
+            firestoreSyncRepository.companyProfile.collect { profile ->
+                if (profile != null && !isPlaceholderCompany(profile.storeName, profile.storeRif)) {
+                    if (profile.storeName.isNotBlank() && !profile.storeName.equals("Mi Tienda", ignoreCase = true)) {
+                        _storeName.value = profile.storeName
+                    }
+                    if (profile.storeRif.isNotBlank() && !profile.storeRif.equals("J-00000000-0", ignoreCase = true) && profile.storeRif != "00000000") {
+                        _storeRif.value = profile.storeRif
+                    }
+                    if (profile.storePhone.isNotBlank() && profile.storePhone != "0000-0000000") {
+                        _storePhone.value = profile.storePhone
+                    }
+                    if (profile.storeAddress.isNotBlank() && profile.storeAddress != "Dirección") {
+                        _storeAddress.value = profile.storeAddress
+                    }
+                    if (profile.googleEmail.isNotBlank()) {
+                        _companyGoogleAccount.value = profile.googleEmail
+                    }
+                    _isCompanyRegistered.value = true
+                }
+            }
+        }
+
         viewModelScope.launch {
             try {
                 if (repository.getUsersCount() == 0) {
@@ -980,8 +1198,9 @@ class PosViewModel(
             }
 
             try {
-                if (prefs.isCloudConnected || cloudSyncRepository.isConfigured()) {
+                if (prefs.isCloudConnected || cloudSyncRepository.isConfigured() || !googleAuthUserEmail.value.isNullOrBlank()) {
                     cloudSyncRepository.startSync()
+                    firestoreSyncRepository.startSync()
                 }
 
                 // Check for remote account backup if logged in with Google Cloud
@@ -1437,6 +1656,7 @@ class PosViewModel(
         paymentMobileBs: Double,
         paymentCardBs: Double,
         paymentCreditUsd: Double = 0.0,
+        paymentCasheaUsd: Double = 0.0,
         creditDueDate: Long = 0L,
         creditNotes: String = "",
         discountUsd: Double = 0.0,
@@ -1535,6 +1755,7 @@ class PosViewModel(
             paymentMobileBs = paymentMobileBs,
             paymentCardBs = paymentCardBs,
             paymentCreditUsd = paymentCreditUsd,
+            paymentCasheaUsd = paymentCasheaUsd,
             isCreditPaid = paymentCreditUsd <= 0.001,
             creditPaidAmountUsd = 0.0,
             creditDueDate = creditDueDate,
@@ -1676,7 +1897,7 @@ class PosViewModel(
     fun exportProductsToCsv(): String {
         val list = allProducts.value
         val sb = StringBuilder()
-        sb.append("Codigo,Nombre,Categoria,PrecioUSD,Stock,CostoUSD,FacturaCompra,ExentoIVA,TieneComision,PorcentajeComision,MontoComisionUSD,EsReceta\n")
+        sb.append("Codigo,Nombre,Categoria,PrecioUSD,PrecioMayorUSD,Stock,CostoUSD,FacturaCompra,ExentoIVA,TieneComision,PorcentajeComision,MontoComisionUSD,EsReceta\n")
         val escapeCsv = { text: String ->
             if (text.contains(",") || text.contains("\"") || text.contains("\n")) {
                 "\"" + text.replace("\"", "\"\"") + "\""
@@ -1689,6 +1910,7 @@ class PosViewModel(
             sb.append("${escapeCsv(p.name)},")
             sb.append("${escapeCsv(p.category)},")
             sb.append("${String.format(java.util.Locale.US, "%.2f", p.priceUsd)},")
+            sb.append("${String.format(java.util.Locale.US, "%.2f", p.wholesalePriceUsd)},")
             sb.append("${p.stock},")
             sb.append("${String.format(java.util.Locale.US, "%.2f", p.costPriceUsd)},")
             sb.append("${escapeCsv(p.invoiceNumber)},")
@@ -2056,40 +2278,497 @@ class PosViewModel(
         }
     }
 
-    // --- CONVERSATIONAL ASSISTANT METHODS ---
+    // --- QUOTES / ESTIMATES (PRESUPUESTOS PARA CLIENTES) ---
+
+    fun consumePosPrefillCustomer() {
+        _posPrefillCustomer.value = null
+    }
+
+    fun addToQuoteCart(product: Product) {
+        val current = _quoteCart.value.toMutableList()
+        val existing = current.find { it.product.id == product.id && it.customPrice == null }
+        if (existing != null) {
+            current[current.indexOf(existing)] = existing.copy(quantity = existing.quantity + 1.0)
+        } else {
+            current.add(CartItem(product, 1.0))
+        }
+        _quoteCart.value = current
+    }
+
+    fun updateQuoteCartItem(item: CartItem, newQuantity: Double, newPrice: Double? = null) {
+        val current = _quoteCart.value.toMutableList()
+        val index = current.indexOfFirst { it === item }
+        if (index != -1) {
+            if (newQuantity <= 0.0) {
+                current.removeAt(index)
+            } else {
+                current[index] = item.copy(quantity = newQuantity, customPrice = newPrice)
+            }
+            _quoteCart.value = current
+        }
+    }
+
+    fun removeFromQuoteCart(item: CartItem) {
+        val current = _quoteCart.value.toMutableList()
+        current.removeIf { it === item }
+        _quoteCart.value = current
+    }
+
+    fun clearQuoteCart() {
+        _quoteCart.value = emptyList()
+    }
+
+    fun createQuote(
+        customerName: String,
+        customerDocument: String,
+        customerPhone: String = "",
+        validityDays: Int = 7,
+        discountUsd: Double = 0.0,
+        notesOrConditions: String = "",
+        onSuccess: (Quote, List<QuoteItem>) -> Unit
+    ): Boolean {
+        val currentCart = _quoteCart.value
+        if (currentCart.isEmpty()) return false
+
+        val taxableItems = currentCart.filter { !it.product.isTaxExempt }
+        val exemptItems = currentCart.filter { it.product.isTaxExempt }
+
+        val taxableGrossUsd = taxableItems.sumOf { it.effectivePrice * it.quantity }
+        val exemptGrossUsd = exemptItems.sumOf { it.effectivePrice * it.quantity }
+
+        val subtotalTaxableBase = taxableGrossUsd / 1.16
+        val subtotalExemptBase = exemptGrossUsd
+        val subtotalBeforeTax = subtotalTaxableBase + subtotalExemptBase
+
+        val effectiveDiscount = minOf(maxOf(0.0, discountUsd), subtotalBeforeTax)
+
+        val ratioTaxable = if (subtotalBeforeTax > 0.0001) subtotalTaxableBase / subtotalBeforeTax else 1.0
+        val ratioExempt = if (subtotalBeforeTax > 0.0001) subtotalExemptBase / subtotalBeforeTax else 0.0
+
+        val discountTaxable = effectiveDiscount * ratioTaxable
+        val discountExempt = effectiveDiscount * ratioExempt
+
+        val baseTaxableUsd = maxOf(0.0, subtotalTaxableBase - discountTaxable)
+        val baseExemptUsd = maxOf(0.0, subtotalExemptBase - discountExempt)
+
+        val ivaUsd = baseTaxableUsd * 0.16
+        val totalUsd = baseTaxableUsd + baseExemptUsd + ivaUsd
+
+        val rate = if (_bcvRate.value > 0.001) _bcvRate.value else 1.0
+        val totalBs = totalUsd * rate
+
+        val now = System.currentTimeMillis()
+        val safeValidityDays = validityDays.coerceIn(1, 365)
+        val validUntil = now + safeValidityDays.toLong() * 24L * 60L * 60L * 1000L
+
+        val currentCashier = _currentUser.value?.username ?: "Cajero"
+        val currentRegister = prefs.cashRegisterNumber.ifBlank { "01" }
+
+        viewModelScope.launch {
+            val quoteNumber = repository.getNextQuoteNumber()
+            val quote = Quote(
+                quoteNumber = quoteNumber,
+                customerName = customerName.ifBlank { "Consumidor Final" },
+                customerDocument = customerDocument.ifBlank { "V-00000000" },
+                customerPhone = customerPhone.trim(),
+                timestamp = now,
+                validityDays = safeValidityDays,
+                validUntil = validUntil,
+                rateBcv = rate,
+                baseTaxableUsd = baseTaxableUsd,
+                baseExemptUsd = baseExemptUsd,
+                ivaUsd = ivaUsd,
+                discountUsd = effectiveDiscount,
+                totalUsd = totalUsd,
+                totalBs = totalBs,
+                notesOrConditions = notesOrConditions.trim(),
+                status = "VIGENTE",
+                cashierName = currentCashier,
+                cashRegisterNumber = currentRegister
+            )
+            val items = currentCart.map {
+                QuoteItem(
+                    quoteId = 0,
+                    productId = it.product.id,
+                    productName = it.product.name,
+                    quantity = it.quantity,
+                    priceUsd = it.effectivePrice,
+                    isTaxExempt = it.product.isTaxExempt
+                )
+            }
+            val id = repository.createQuote(quote, items)
+            val finalQuote = quote.copy(id = id.toInt())
+            val finalItems = items.map { it.copy(quoteId = id.toInt()) }
+            clearQuoteCart()
+            onSuccess(finalQuote, finalItems)
+        }
+        return true
+    }
+
+    fun getItemsForQuote(quoteId: Int) = repository.getItemsForQuote(quoteId)
+
+    fun updateQuoteStatus(quoteId: Int, status: String) {
+        viewModelScope.launch {
+            repository.updateQuoteStatus(quoteId, status)
+        }
+    }
+
+    fun deleteQuote(quoteId: Int) {
+        viewModelScope.launch {
+            repository.deleteQuote(quoteId)
+        }
+    }
+
+    fun loadQuoteToBillingCart(quote: Quote, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val items = repository.getItemsForQuoteDirect(quote.id)
+            val products = repository.allProducts.firstOrNull() ?: emptyList()
+            val newCartItems = mutableListOf<CartItem>()
+            for (item in items) {
+                val prod = products.find { it.id == item.productId } ?: Product(
+                    id = item.productId,
+                    code = "P-${item.productId}",
+                    name = item.productName,
+                    priceUsd = item.priceUsd,
+                    costPriceUsd = 0.0,
+                    stock = 999.0,
+                    category = "General",
+                    isTaxExempt = item.isTaxExempt
+                )
+                val customPrice = if (kotlin.math.abs(item.priceUsd - prod.priceUsd) > 0.001) item.priceUsd else null
+                newCartItems.add(CartItem(prod, item.quantity, customPrice = customPrice))
+            }
+            _cart.value = newCartItems
+            _posPrefillCustomer.value = quote.customerName to quote.customerDocument
+            repository.updateQuoteStatus(quote.id, "FACTURADO")
+            onSuccess()
+        }
+    }
+
+    // --- CONVERSATIONAL ASSISTANT & GEMINI LIVE METHODS ---
+
+    fun consumeAssistantNavigationRequest() {
+        _assistantNavigationRequest.value = null
+    }
+
+    fun toggleGeminiLive(context: Context) {
+        if (_isGeminiLiveActive.value) {
+            stopGeminiLive()
+        } else {
+            startGeminiLive(context.applicationContext)
+        }
+    }
+
+    fun toggleGeminiLiveMute() {
+        val nextMuted = !_isGeminiLiveMuted.value
+        _isGeminiLiveMuted.value = nextMuted
+        geminiLiveManager?.setMuted(nextMuted)
+        if (_geminiLiveStatus.value == GeminiLiveStatus.FALLBACK_CONTINUOUS) {
+            if (nextMuted) {
+                continuousSttManager?.stopListening()
+                _geminiLiveStatusText.value = "Micrófono silenciado (Voz continua en espera)"
+            } else {
+                _geminiLiveStatusText.value = "Voz continua activa • Habla sin pausas"
+            }
+        }
+    }
+
+    fun startGeminiLive(appContext: Context) {
+        stopGeminiLive()
+        _isGeminiLiveActive.value = true
+        _isGeminiLiveMuted.value = false
+        _liveUserTranscript.value = ""
+        _liveModelTranscript.value = ""
+
+        val apiKey = geminiRepository.getEffectiveApiKeyOrNull()
+        if (apiKey == null) {
+            startContinuousVoiceFallback(
+                appContext = appContext,
+                notice = "⚡ Modo Voz Continua activado (sin cortes). Para usar audio nativo bidireccional de Gemini Live, configura una clave API de Gemini en Ajustes."
+            )
+            return
+        }
+
+        _geminiLiveStatus.value = GeminiLiveStatus.CONNECTING
+        _geminiLiveStatusText.value = "Conectando con Gemini Live..."
+
+        viewModelScope.launch {
+            val products = repository.allProducts.firstOrNull() ?: emptyList()
+            val suppliers = repository.allSuppliers.firstOrNull() ?: emptyList()
+            val customers = repository.allCustomers.firstOrNull() ?: emptyList()
+            val sales = repository.allSales.firstOrNull() ?: emptyList()
+            val (todayUsd, todayBs, todayCount) = computeTodaySalesMetrics(sales)
+
+            val effectiveMinMargin = if (_isMinProfitMarginEnabled.value && _minProfitMarginPercent.value > 0.0) {
+                _minProfitMarginPercent.value
+            } else null
+
+            val systemInstruction = geminiRepository.buildSystemInstruction(
+                catalogSummary = ConversationalAssistantEngine.buildCatalogSummary(products),
+                suppliersSummary = ConversationalAssistantEngine.buildSuppliersSummary(suppliers),
+                customersSummary = ConversationalAssistantEngine.buildCustomersSummary(customers),
+                bcvRate = _bcvRate.value,
+                todaySalesSummary = "Ventas: $todayCount | Total: $${"%.2f".format(Locale.US, todayUsd)} USD (Bs. ${"%.2f".format(Locale.US, todayBs)})",
+                minProfitMarginPercent = effectiveMinMargin,
+                pendingActionSummary = ConversationalAssistantEngine.summarizePendingAction(_pendingAssistantAction.value)
+            )
+
+            val manager = GeminiLiveManager(object : GeminiLiveCallbacks {
+                override fun onStatusChanged(status: GeminiLiveStatus, detail: String) {
+                    _geminiLiveStatus.value = status
+                    if (detail.isNotBlank()) {
+                        _geminiLiveStatusText.value = detail
+                    }
+                    if (status == GeminiLiveStatus.DISCONNECTED && _isGeminiLiveActive.value) {
+                        _isGeminiLiveActive.value = false
+                    }
+                }
+
+                override fun onUserTranscript(partialOrFull: String, isTurnComplete: Boolean) {
+                    if (isTurnComplete) {
+                        _liveUserTranscript.value = ""
+                        if (partialOrFull.isNotBlank()) {
+                            _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                                sender = AssistantSender.USER,
+                                text = partialOrFull
+                            )
+                        }
+                    } else {
+                        _liveUserTranscript.value = partialOrFull
+                    }
+                }
+
+                override fun onModelTranscript(partialOrFull: String, isTurnComplete: Boolean) {
+                    if (isTurnComplete) {
+                        _liveModelTranscript.value = ""
+                        if (partialOrFull.isNotBlank()) {
+                            _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                                sender = AssistantSender.ASSISTANT,
+                                text = partialOrFull
+                            )
+                        }
+                    } else {
+                        _liveModelTranscript.value = partialOrFull
+                    }
+                }
+
+                override fun onAudioLevelChanged(level: Float) {
+                    _liveAudioLevel.value = level
+                }
+
+                override suspend fun onToolCall(functionName: String, args: Map<String, Any>): Map<String, Any> {
+                    return executeLiveToolCall(functionName, args)
+                }
+
+                override fun onError(message: String) {
+                    if (_isGeminiLiveActive.value) {
+                        geminiLiveManager?.disconnect()
+                        geminiLiveManager = null
+                        startContinuousVoiceFallback(
+                            appContext = appContext,
+                            notice = "⚠️ $message\nCambiando automáticamente a **Voz Continua Inteligente** para no interrumpirte."
+                        )
+                    }
+                }
+            })
+
+            geminiLiveManager = manager
+            manager.connect(
+                apiKey = apiKey,
+                model = geminiRepository.getLiveModel(),
+                systemInstruction = systemInstruction,
+                toolDeclarations = geminiRepository.getToolDeclarationsJson()
+            )
+        }
+    }
+
+    private fun startContinuousVoiceFallback(appContext: Context, notice: String? = null) {
+        _isGeminiLiveActive.value = true
+        _geminiLiveStatus.value = GeminiLiveStatus.FALLBACK_CONTINUOUS
+        _geminiLiveStatusText.value = "Voz continua activa • Habla con fluidez"
+        if (!notice.isNullOrBlank()) {
+            _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                sender = AssistantSender.SYSTEM,
+                text = notice
+            )
+        }
+
+        val stt = continuousSttManager ?: SpeechToTextManager(appContext).also { continuousSttManager = it }
+        stt.startListening(
+            continuous = true,
+            silenceTimeoutMs = 3500L,
+            onRmsChanged = { rms ->
+                _liveAudioLevel.value = ((rms + 2f) / 12f).coerceIn(0f, 1f)
+            },
+            onPartialResults = { partial ->
+                if (!_isGeminiLiveMuted.value) {
+                    _liveUserTranscript.value = partial
+                }
+            },
+            onResults = { recognized ->
+                _liveUserTranscript.value = ""
+                if (!_isGeminiLiveMuted.value && recognized.isNotBlank()) {
+                    sendAssistantMessage(recognized)
+                }
+            },
+            onError = { _ ->
+                // Continuous mode automatically restarts on silence; critical errors notify gently
+            }
+        )
+    }
+
+    fun stopGeminiLive() {
+        _isGeminiLiveActive.value = false
+        _isGeminiLiveMuted.value = false
+        _liveUserTranscript.value = ""
+        _liveModelTranscript.value = ""
+        _liveAudioLevel.value = 0f
+        _geminiLiveStatus.value = GeminiLiveStatus.DISCONNECTED
+        _geminiLiveStatusText.value = ""
+        geminiLiveManager?.disconnect()
+        geminiLiveManager = null
+        continuousSttManager?.stopListening()
+        continuousSttManager = null
+    }
+
+    private suspend fun executeLiveToolCall(functionName: String, args: Map<String, Any>): Map<String, Any> {
+        val products = repository.allProducts.firstOrNull() ?: emptyList()
+        val suppliers = repository.allSuppliers.firstOrNull() ?: emptyList()
+        val customers = repository.allCustomers.firstOrNull() ?: emptyList()
+        val quotes = repository.allQuotes.firstOrNull() ?: emptyList()
+        val sales = repository.allSales.firstOrNull() ?: emptyList()
+        val (todayUsd, todayBs, todayCount) = computeTodaySalesMetrics(sales)
+
+        val readOnlyResult = assistantEngine.executeReadOnlyLookup(
+            name = functionName,
+            args = args,
+            products = products,
+            customers = customers,
+            quotes = quotes,
+            sales = sales,
+            bcvRate = _bcvRate.value,
+            todaySalesTotalUsd = todayUsd,
+            todaySalesTotalBs = todayBs,
+            todaySalesCount = todayCount
+        )
+        if (readOnlyResult != null) {
+            return readOnlyResult
+        }
+
+        val effectiveMinMargin = if (_isMinProfitMarginEnabled.value && _minProfitMarginPercent.value > 0.0) {
+            _minProfitMarginPercent.value
+        } else null
+
+        val result = assistantEngine.handleGeminiFunctionCall(
+            name = functionName,
+            args = args,
+            currentPendingAction = _pendingAssistantAction.value,
+            products = products,
+            suppliers = suppliers,
+            customers = customers,
+            quotes = quotes,
+            sales = sales,
+            bcvRate = _bcvRate.value,
+            todaySalesTotalUsd = todayUsd,
+            todaySalesTotalBs = todayBs,
+            todaySalesCount = todayCount,
+            minProfitMarginPercent = effectiveMinMargin
+        )
+
+        return when (result) {
+            is ProcessResult.ProposeAction -> {
+                _pendingAssistantAction.value = result.action
+                val resolvedPrevious = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                }
+                _assistantMessages.value = resolvedPrevious + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = result.proposalText,
+                    pendingAction = result.action
+                )
+                mapOf(
+                    "status" to "proposed",
+                    "summary" to (ConversationalAssistantEngine.summarizePendingAction(result.action) ?: result.proposalText),
+                    "instruction" to "Se mostró el borrador en pantalla. Resúmelo brevemente al usuario y pregúntale si desea confirmar o modificar algo."
+                )
+            }
+            is ProcessResult.ConfirmAction -> {
+                val msg = executePendingActionAndAwait(result.action)
+                mapOf("status" to "confirmed", "message" to msg)
+            }
+            is ProcessResult.CancelAction -> {
+                cancelPendingAction()
+                mapOf("status" to "cancelled", "message" to result.cancellationText)
+            }
+            is ProcessResult.Navigate -> {
+                _assistantNavigationRequest.value = result.route
+                _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = result.text
+                )
+                mapOf("status" to "navigated", "route" to result.route)
+            }
+            is ProcessResult.DirectReply -> {
+                mapOf("status" to "ok", "message" to result.text)
+            }
+        }
+    }
+
+    private fun computeTodaySalesMetrics(sales: List<Sale>): Triple<Double, Double, Int> {
+        val cal = Calendar.getInstance()
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        val startOfDay = cal.timeInMillis
+        val todaySales = sales.filter { it.timestamp >= startOfDay }
+        return Triple(todaySales.sumOf { it.totalUsd }, todaySales.sumOf { it.totalBs }, todaySales.size)
+    }
 
     fun sendAssistantMessage(rawText: String) {
         val userPrompt = rawText.trim()
         if (userPrompt.isBlank()) return
 
-        // Append User Message to history
+        // If native Gemini Live WebSocket is active, route typed text turn through Live session
+        val liveWsActive = _isGeminiLiveActive.value &&
+            _geminiLiveStatus.value in setOf(
+                GeminiLiveStatus.CONNECTED_LISTENING,
+                GeminiLiveStatus.MODEL_SPEAKING,
+                GeminiLiveStatus.PROCESSING_TOOL
+            )
+
         val userMsg = AssistantChatMessage(
             sender = AssistantSender.USER,
             text = userPrompt
         )
         _assistantMessages.value = _assistantMessages.value + userMsg
+
+        if (liveWsActive && geminiLiveManager != null) {
+            geminiLiveManager?.sendTextTurn(userPrompt)
+            return
+        }
+
         _isAssistantThinking.value = true
 
         viewModelScope.launch {
             try {
                 val products = repository.allProducts.firstOrNull() ?: emptyList()
                 val suppliers = repository.allSuppliers.firstOrNull() ?: emptyList()
+                val customers = repository.allCustomers.firstOrNull() ?: emptyList()
+                val quotes = repository.allQuotes.firstOrNull() ?: emptyList()
                 val sales = repository.allSales.firstOrNull() ?: emptyList()
 
-                // Calculate today's sales summary
-                val cal = Calendar.getInstance()
-                cal.set(Calendar.HOUR_OF_DAY, 0)
-                cal.set(Calendar.MINUTE, 0)
-                cal.set(Calendar.SECOND, 0)
-                cal.set(Calendar.MILLISECOND, 0)
-                val startOfDay = cal.timeInMillis
-
-                val todaySales = sales.filter { it.timestamp >= startOfDay }
-                val totalUsd = todaySales.sumOf { it.totalUsd }
-                val totalBs = todaySales.sumOf { it.totalBs }
-                val salesCount = todaySales.size
-
+                val (totalUsd, totalBs, salesCount) = computeTodaySalesMetrics(sales)
                 val currentPending = _pendingAssistantAction.value
+                val effectiveMinMargin = if (_isMinProfitMarginEnabled.value && _minProfitMarginPercent.value > 0.0) {
+                    _minProfitMarginPercent.value
+                } else null
+
+                val historyPairs = _assistantMessages.value
+                    .dropLast(1)
+                    .filter { it.sender == AssistantSender.USER || it.sender == AssistantSender.ASSISTANT }
+                    .takeLast(8)
+                    .map { (if (it.sender == AssistantSender.USER) "USER" else "MODEL") to it.text }
 
                 val result = assistantEngine.processMessage(
                     rawText = userPrompt,
@@ -2100,48 +2779,54 @@ class PosViewModel(
                     bcvRate = _bcvRate.value,
                     todaySalesTotalUsd = totalUsd,
                     todaySalesTotalBs = totalBs,
-                    todaySalesCount = salesCount
+                    todaySalesCount = salesCount,
+                    minProfitMarginPercent = effectiveMinMargin,
+                    customers = customers,
+                    quotes = quotes,
+                    conversationHistory = historyPairs
                 )
 
                 _isAssistantThinking.value = false
 
                 when (result) {
                     is ProcessResult.DirectReply -> {
-                        val replyMsg = AssistantChatMessage(
+                        _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
                             sender = AssistantSender.ASSISTANT,
                             text = result.text
                         )
-                        _assistantMessages.value = _assistantMessages.value + replyMsg
                     }
                     is ProcessResult.ProposeAction -> {
                         _pendingAssistantAction.value = result.action
-                        val replyMsg = AssistantChatMessage(
+                        val resolvedPrevious = _assistantMessages.value.map {
+                            if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                        }
+                        _assistantMessages.value = resolvedPrevious + AssistantChatMessage(
                             sender = AssistantSender.ASSISTANT,
                             text = result.proposalText,
                             pendingAction = result.action
                         )
-                        _assistantMessages.value = _assistantMessages.value + replyMsg
                     }
                     is ProcessResult.ConfirmAction -> {
                         executePendingAction(result.action)
                     }
                     is ProcessResult.CancelAction -> {
-                        _pendingAssistantAction.value = null
-                        val replyMsg = AssistantChatMessage(
+                        cancelPendingAction()
+                    }
+                    is ProcessResult.Navigate -> {
+                        _assistantNavigationRequest.value = result.route
+                        _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
                             sender = AssistantSender.ASSISTANT,
-                            text = "❌ " + result.cancellationText
+                            text = result.text
                         )
-                        _assistantMessages.value = _assistantMessages.value + replyMsg
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 _isAssistantThinking.value = false
-                val errorMsg = AssistantChatMessage(
+                _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
                     sender = AssistantSender.ASSISTANT,
                     text = "⚠️ Ocurrió un error al procesar tu solicitud: ${e.localizedMessage ?: "Error desconocido"}"
                 )
-                _assistantMessages.value = _assistantMessages.value + errorMsg
             }
         }
     }
@@ -2153,11 +2838,15 @@ class PosViewModel(
 
     fun cancelPendingAction() {
         _pendingAssistantAction.value = null
+        val resolved = _assistantMessages.value.map {
+            if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+        }
         val cancelMsg = AssistantChatMessage(
             sender = AssistantSender.ASSISTANT,
             text = "❌ Operación cancelada. No se aplicaron modificaciones en la base de datos."
         )
-        _assistantMessages.value = _assistantMessages.value + cancelMsg
+        _assistantMessages.value = resolved + cancelMsg
+        geminiLiveManager?.sendContextUpdate("El usuario canceló la acción pendiente.")
     }
 
     fun selectDisambiguatedProduct(item: DisambiguationItem) {
@@ -2167,74 +2856,215 @@ class PosViewModel(
         }
     }
 
-    private fun executePendingAction(action: PendingAssistantAction) {
-        _pendingAssistantAction.value = null
+    fun updatePendingCreateProductAction(
+        messageId: String,
+        updatedAction: PendingAssistantAction.CreateProductAction
+    ) {
+        _pendingAssistantAction.value = updatedAction
+        val formattedText = ConversationalAssistantEngine.formatCreateProductProposal(
+            action = updatedAction,
+            bcvRate = _bcvRate.value,
+            viaGemini = false
+        )
+        _assistantMessages.value = _assistantMessages.value.map { msg ->
+            if (msg.id == messageId) {
+                msg.copy(
+                    text = formattedText,
+                    pendingAction = updatedAction
+                )
+            } else {
+                msg
+            }
+        }
+        ConversationalAssistantEngine.summarizePendingAction(updatedAction)?.let {
+            geminiLiveManager?.sendContextUpdate(it)
+        }
+    }
 
+    fun updatePendingCreateQuoteAction(
+        messageId: String,
+        updatedAction: PendingAssistantAction.CreateQuoteAction
+    ) {
+        val recalculated = ConversationalAssistantEngine.buildCreateQuoteAction(
+            customerName = updatedAction.customerName,
+            customerDocument = updatedAction.customerDocument,
+            customerPhone = updatedAction.customerPhone,
+            items = updatedAction.items,
+            validityDays = updatedAction.validityDays,
+            discountUsd = updatedAction.discountUsd,
+            notesOrConditions = updatedAction.notesOrConditions,
+            bcvRate = _bcvRate.value
+        )
+        _pendingAssistantAction.value = recalculated
+        val formattedText = ConversationalAssistantEngine.formatCreateQuoteProposal(
+            action = recalculated,
+            bcvRate = _bcvRate.value,
+            viaGemini = false
+        )
+        _assistantMessages.value = _assistantMessages.value.map { msg ->
+            if (msg.id == messageId) {
+                msg.copy(
+                    text = formattedText,
+                    pendingAction = recalculated
+                )
+            } else {
+                msg
+            }
+        }
+        ConversationalAssistantEngine.summarizePendingAction(recalculated)?.let {
+            geminiLiveManager?.sendContextUpdate(it)
+        }
+    }
+
+    private fun executePendingAction(action: PendingAssistantAction) {
+        viewModelScope.launch {
+            executePendingActionAndAwait(action)
+        }
+    }
+
+    private suspend fun executePendingActionAndAwait(action: PendingAssistantAction): String {
         when (action) {
             is PendingAssistantAction.CreateProductAction -> {
+                if (action.priceUsd <= 0.0) {
+                    val warn = "⚠️ Falta definir el **Precio de Venta** (mayor a $0.00). Pulsa **'Modificar / Agregar Info'** para ingresar el precio de venta o el porcentaje de ganancia."
+                    _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                        sender = AssistantSender.ASSISTANT,
+                        text = warn
+                    )
+                    return warn
+                }
+                _pendingAssistantAction.value = null
+                val finalCode = action.code.trim().ifBlank { "P-${System.currentTimeMillis() % 100000}" }
                 val success = addProduct(
-                    code = "P-${System.currentTimeMillis() % 100000}",
+                    code = finalCode,
                     name = action.name,
                     category = action.category.ifBlank { "General" },
                     priceUsd = action.priceUsd,
                     stock = if (action.isRecipe) 0.0 else action.stock,
                     costPriceUsd = if (action.isRecipe) 0.0 else action.costPriceUsd,
                     isRecipe = action.isRecipe,
-                    isTaxExempt = action.isTaxExempt
+                    isTaxExempt = action.isTaxExempt,
+                    wholesalePriceUsd = action.wholesalePriceUsd
                 )
 
                 val replyText = if (success) {
                     val typeText = if (action.isRecipe) "Receta/Servicio" else "Producto (${action.stock} existencias)"
+                    val wholesaleText = if (action.wholesalePriceUsd > 0.0) "\n• Precio al Mayor: **$${"%.2f".format(Locale.US, action.wholesalePriceUsd)}**" else ""
+                    val profitText = if (!action.isRecipe && action.profitPercentage > 0.0) " (+${"%.1f".format(Locale.US, action.profitPercentage)}%)" else ""
                     "✅ **¡Producto Creado con Éxito!**\n" +
-                            "• Nombre: **${action.name}**\n" +
-                            "• Tipo: $typeText\n" +
-                            "• Precio de Venta: **$${"%.2f".format(java.util.Locale.US, action.priceUsd)}**\n" +
-                            "• Costo: $${"%.2f".format(java.util.Locale.US, action.costPriceUsd)}\n" +
-                            "Ya se encuentra disponible en el catálogo del POS."
+                        "• Código: **$finalCode**\n" +
+                        "• Nombre: **${action.name}**\n" +
+                        "• Tipo: $typeText\n" +
+                        "• Precio de Venta: **$${"%.2f".format(Locale.US, action.priceUsd)}**$profitText$wholesaleText\n" +
+                        "• Costo: $${"%.2f".format(Locale.US, action.costPriceUsd)}\n" +
+                        "Ya se encuentra disponible en el catálogo del POS."
                 } else {
                     "⚠️ No se pudo registrar el producto debido a los límites de inventario de la versión."
                 }
 
-                _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
                     sender = AssistantSender.ASSISTANT,
                     text = replyText,
                     isConfirmedOrResolved = true
                 )
+                return replyText
+            }
+            is PendingAssistantAction.CreateQuoteAction -> {
+                if (action.items.isEmpty()) {
+                    val warn = "⚠️ El presupuesto no tiene productos."
+                    _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                        sender = AssistantSender.ASSISTANT,
+                        text = warn
+                    )
+                    return warn
+                }
+                _pendingAssistantAction.value = null
+                val totals = ConversationalAssistantEngine.calculateQuoteTotals(action.items, action.discountUsd, _bcvRate.value)
+                val now = System.currentTimeMillis()
+                val safeValidityDays = action.validityDays.coerceIn(1, 365)
+                val validUntil = now + safeValidityDays.toLong() * 24L * 60L * 60L * 1000L
+                val rate = if (_bcvRate.value > 0.001) _bcvRate.value else 1.0
+                val quoteNumber = repository.getNextQuoteNumber()
+
+                val quote = Quote(
+                    quoteNumber = quoteNumber,
+                    customerName = action.customerName.ifBlank { "Consumidor Final" },
+                    customerDocument = action.customerDocument.ifBlank { "V-00000000" },
+                    customerPhone = action.customerPhone.trim(),
+                    timestamp = now,
+                    validityDays = safeValidityDays,
+                    validUntil = validUntil,
+                    rateBcv = rate,
+                    baseTaxableUsd = totals.baseTaxableUsd,
+                    baseExemptUsd = totals.baseExemptUsd,
+                    ivaUsd = totals.ivaUsd,
+                    discountUsd = totals.discountUsd,
+                    totalUsd = totals.totalUsd,
+                    totalBs = totals.totalBs,
+                    notesOrConditions = action.notesOrConditions.trim(),
+                    status = "VIGENTE",
+                    cashierName = _currentUser.value?.username ?: "Asistente",
+                    cashRegisterNumber = prefs.cashRegisterNumber.ifBlank { "01" }
+                )
+                val quoteItems = action.items.map {
+                    QuoteItem(
+                        quoteId = 0,
+                        productId = it.productId,
+                        productName = it.productName,
+                        quantity = it.quantity,
+                        priceUsd = it.priceUsd,
+                        isTaxExempt = it.isTaxExempt
+                    )
+                }
+                val newQuoteId = repository.createQuote(quote, quoteItems).toInt()
+                val replyText = "✅ **¡Presupuesto $quoteNumber Generado!**\n" +
+                    "• Cliente: **${quote.customerName}**\n" +
+                    "• Artículos: **${quoteItems.size}** • Validez: **$safeValidityDays días**\n" +
+                    "• Total: **$${"%.2f".format(Locale.US, quote.totalUsd)} USD** (Bs. ${"%.2f".format(Locale.US, quote.totalBs)})\n\n" +
+                    "Toca el botón inferior para ver el ticket o enviarlo directamente por WhatsApp."
+
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = replyText,
+                    isConfirmedOrResolved = true,
+                    createdQuoteId = newQuoteId
+                )
+                return replyText
             }
             is PendingAssistantAction.AddStockAction -> {
-                viewModelScope.launch {
-                    val products = repository.allProducts.firstOrNull() ?: emptyList()
-                    val target = products.find { it.id == action.productId }
-                    if (target != null) {
-                        val updatedStock = target.stock + action.quantityToAdd
-                        val updatedCost = action.newCostPriceUsd ?: target.costPriceUsd
-                        val updatedProduct = target.copy(
-                            stock = updatedStock,
-                            costPriceUsd = updatedCost
-                        )
-                        updateProduct(updatedProduct)
-
-                        val replyText = "✅ **¡Existencias Actualizadas con Éxito!**\n" +
-                                "• Producto: **${target.name}**\n" +
-                                "• Existencias previas: ${target.stock} uds\n" +
-                                "• Unidades añadidas: **+${action.quantityToAdd} uds**\n" +
-                                "• Nuevo Stock Total: **$updatedStock uds**"
-
-                        _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
-                            sender = AssistantSender.ASSISTANT,
-                            text = replyText,
-                            isConfirmedOrResolved = true
-                        )
-                    } else {
-                        _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
-                            sender = AssistantSender.ASSISTANT,
-                            text = "⚠️ No se encontró el producto en inventario para actualizar.",
-                            isConfirmedOrResolved = true
-                        )
-                    }
+                _pendingAssistantAction.value = null
+                val products = repository.allProducts.firstOrNull() ?: emptyList()
+                val target = products.find { it.id == action.productId }
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
                 }
+                val replyText = if (target != null) {
+                    val updatedStock = target.stock + action.quantityToAdd
+                    val updatedCost = action.newCostPriceUsd ?: target.costPriceUsd
+                    updateProduct(target.copy(stock = updatedStock, costPriceUsd = updatedCost))
+                    "✅ **¡Existencias Actualizadas con Éxito!**\n" +
+                        "• Producto: **${target.name}**\n" +
+                        "• Existencias previas: ${target.stock} uds\n" +
+                        "• Unidades añadidas: **+${action.quantityToAdd} uds**\n" +
+                        "• Nuevo Stock Total: **$updatedStock uds**"
+                } else {
+                    "⚠️ No se encontró el producto en inventario para actualizar."
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = replyText,
+                    isConfirmedOrResolved = true
+                )
+                return replyText
             }
             is PendingAssistantAction.CreatePurchaseInvoiceAction -> {
+                _pendingAssistantAction.value = null
                 addPurchaseInvoice(
                     supplierId = action.supplierId,
                     invoiceNumber = action.invoiceNumber,
@@ -2242,54 +3072,106 @@ class PosViewModel(
                     description = action.description
                 )
                 val replyText = "✅ **¡Factura de Proveedor Registrada con Éxito!**\n" +
-                        "• Proveedor: **${action.supplierName}**\n" +
-                        "• Factura N°: **${action.invoiceNumber}**\n" +
-                        "• Monto Total: **$${"%.2f".format(java.util.Locale.US, action.totalAmount)} USD**\n" +
-                        "El comprobante ha sido almacenado en el módulo de compras."
+                    "• Proveedor: **${action.supplierName}**\n" +
+                    "• Factura N°: **${action.invoiceNumber}**\n" +
+                    "• Monto Total: **$${"%.2f".format(Locale.US, action.totalAmount)} USD**\n" +
+                    "El comprobante ha sido almacenado en el módulo de compras."
 
-                _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
                     sender = AssistantSender.ASSISTANT,
                     text = replyText,
                     isConfirmedOrResolved = true
                 )
+                return replyText
             }
             is PendingAssistantAction.CreateCustomerAction -> {
+                _pendingAssistantAction.value = null
                 addCustomer(
                     name = action.name,
                     documentId = action.documentId,
                     address = action.address,
                     phone = action.phone
                 )
-                _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                val replyText = "✅ **¡Cliente Registrado con Éxito!**\n• Nombre: **${action.name}**\n• Cédula/RIF: **${action.documentId}**\nYa está disponible para facturación y presupuestos."
+                _assistantMessages.value = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                } + AssistantChatMessage(
                     sender = AssistantSender.ASSISTANT,
-                    text = "✅ **¡Cliente Registrado con Éxito!**\n• Nombre: **${action.name}**\n• Cédula/RIF: **${action.documentId}**\nYa está disponible para facturación.",
+                    text = replyText,
                     isConfirmedOrResolved = true
                 )
+                return replyText
+            }
+            is PendingAssistantAction.RegisterExpenseAction -> {
+                _pendingAssistantAction.value = null
+                addExpense(
+                    category = action.category.ifBlank { "Operativo" },
+                    invoiceNumber = "AST-${System.currentTimeMillis() % 10000}",
+                    amountUsd = action.amountUsd,
+                    paymentMethod = "Efectivo USD",
+                    description = action.description
+                )
+                val replyText = "✅ **¡Gasto Registrado con Éxito!**\n" +
+                    "• Concepto: **${action.description}**\n" +
+                    "• Categoría: **${action.category}**\n" +
+                    "• Monto: **$${"%.2f".format(Locale.US, action.amountUsd)} USD**"
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = replyText,
+                    isConfirmedOrResolved = true
+                )
+                return replyText
+            }
+            is PendingAssistantAction.UpdateBcvRateAction -> {
+                _pendingAssistantAction.value = null
+                setBcvRate(action.newRateBs)
+                val replyText = "✅ **¡Tasa Oficial BCV Actualizada!**\n• Nueva tasa vigente: **Bs. ${"%.2f".format(Locale.US, action.newRateBs)} / USD**"
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = replyText,
+                    isConfirmedOrResolved = true
+                )
+                return replyText
             }
             is PendingAssistantAction.DeleteProductAction -> {
-                viewModelScope.launch {
-                    val products = repository.allProducts.firstOrNull() ?: emptyList()
-                    val target = products.find { it.id == action.productId }
-                    if (target != null) {
-                        deleteProduct(target)
-                        _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
-                            sender = AssistantSender.ASSISTANT,
-                            text = "✅ **Producto Eliminado:** **${action.productName}** ha sido removido del catálogo.",
-                            isConfirmedOrResolved = true
-                        )
-                    } else {
-                        _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
-                            sender = AssistantSender.ASSISTANT,
-                            text = "⚠️ No se encontró el producto para eliminar.",
-                            isConfirmedOrResolved = true
-                        )
-                    }
+                _pendingAssistantAction.value = null
+                val products = repository.allProducts.firstOrNull() ?: emptyList()
+                val target = products.find { it.id == action.productId }
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
                 }
+                val replyText = if (target != null) {
+                    deleteProduct(target)
+                    "✅ **Producto Eliminado:** **${action.productName}** ha sido removido del catálogo."
+                } else {
+                    "⚠️ No se encontró el producto para eliminar."
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = replyText,
+                    isConfirmedOrResolved = true
+                )
+                return replyText
             }
             is PendingAssistantAction.SelectDisambiguation -> {
-                // If it was still a disambiguation, nothing to execute directly
+                _pendingAssistantAction.value = null
+                return "Selección cerrada."
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopGeminiLive()
     }
 
     fun clearAssistantChat() {

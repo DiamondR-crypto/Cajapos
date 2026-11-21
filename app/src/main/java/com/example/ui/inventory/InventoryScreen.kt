@@ -52,6 +52,8 @@ fun InventoryScreen(viewModel: PosViewModel) {
     val isUnlimitedInventory by viewModel.isUnlimitedInventory.collectAsStateWithLifecycle()
     val customProductLimit by viewModel.customProductLimit.collectAsStateWithLifecycle()
     val maxProducts = viewModel.getMaxProductsAllowed()
+    val isMinProfitMarginEnabled by viewModel.isMinProfitMarginEnabled.collectAsStateWithLifecycle()
+    val minProfitMarginPercent by viewModel.minProfitMarginPercent.collectAsStateWithLifecycle()
 
     var showLicenseDialog by remember { mutableStateOf(false) }
     var showLimitReachedDialog by remember { mutableStateOf(false) }
@@ -361,6 +363,8 @@ fun InventoryScreen(viewModel: PosViewModel) {
             allProducts = products,
             purchaseInvoices = purchaseInvoices,
             suppliers = suppliers,
+            isMinProfitMarginEnabled = isMinProfitMarginEnabled,
+            minProfitMarginPercent = minProfitMarginPercent,
             onDismiss = { showAddDialog = false },
             onConfirm = { code, name, cat, price, stock, costPrice, invoiceNum, isTaxExempt, hasCommission, commissionPercentage, commissionAmountUsd, isRecipe, isCombo, comboItemsJson, aisleNumber, aisleQty, depotQty, counterQty, allowDecimal, priceModifiable, wholesalePrice ->
                 val added = viewModel.addProduct(
@@ -471,6 +475,8 @@ fun InventoryScreen(viewModel: PosViewModel) {
             allProducts = products,
             purchaseInvoices = purchaseInvoices,
             suppliers = suppliers,
+            isMinProfitMarginEnabled = isMinProfitMarginEnabled,
+            minProfitMarginPercent = minProfitMarginPercent,
             onDismiss = { editingProduct = null },
             onConfirm = { code, name, cat, price, stock, costPrice, invoiceNum, isTaxExempt, hasCommission, commissionPercentage, commissionAmountUsd, isRecipe, isCombo, comboItemsJson, aisleNumber, aisleQty, depotQty, counterQty, allowDecimal, priceModifiable, wholesalePrice ->
                 viewModel.updateProduct(
@@ -891,6 +897,8 @@ fun ProductFormDialog(
     allProducts: List<Product> = emptyList(),
     purchaseInvoices: List<PurchaseInvoice>,
     suppliers: List<Supplier>,
+    isMinProfitMarginEnabled: Boolean = false,
+    minProfitMarginPercent: Double = 0.0,
     onDismiss: () -> Unit,
     onConfirm: (
         code: String,
@@ -941,6 +949,7 @@ fun ProductFormDialog(
 
     var costPriceStr by remember { mutableStateOf(if (initialProduct != null && initialProduct.costPriceUsd > 0) initialProduct.costPriceUsd.toString() else "") }
     var salePriceStr by remember { mutableStateOf(if (initialProduct != null && initialProduct.priceUsd > 0) initialProduct.priceUsd.toString() else "") }
+    var isSalePriceManuallyEdited by remember { mutableStateOf(initialProduct != null && initialProduct.priceUsd > 0) }
     var wholesalePriceStr by remember { mutableStateOf(if (initialProduct != null && initialProduct.wholesalePriceUsd > 0) initialProduct.wholesalePriceUsd.toString() else "") }
     var stockStr by remember { mutableStateOf(if (initialProduct != null) initialProduct.stock.toString() else "") }
     
@@ -1004,6 +1013,19 @@ fun ProductFormDialog(
 
     val rawCostPrice = costPriceStr.replace(",", ".").toDoubleOrNull() ?: 0.0
     val costPrice = if (isCombo) calculatedComboCost else rawCostPrice
+
+    // Auto-calculate sale price from cost using the configured minimum fixed profit percentage (when enabled)
+    LaunchedEffect(costPrice, isMinProfitMarginEnabled, minProfitMarginPercent, isRecipe) {
+        if (initialProduct == null && !isRecipe && isMinProfitMarginEnabled && minProfitMarginPercent > 0.0 && !isSalePriceManuallyEdited) {
+            salePriceStr = if (costPrice > 0.0) {
+                val autoPrice = costPrice * (1.0 + minProfitMarginPercent / 100.0)
+                String.format("%.2f", autoPrice).replace(",", ".")
+            } else {
+                ""
+            }
+        }
+    }
+
     val salePrice = salePriceStr.replace(",", ".").toDoubleOrNull() ?: 0.0
     val wholesalePrice = wholesalePriceStr.replace(",", ".").toDoubleOrNull() ?: 0.0
     val stock = if (isCombo) calculatedComboStock else stockStr.replace(",", ".").toDoubleOrNull() ?: 0.0
@@ -1313,7 +1335,10 @@ fun ProductFormDialog(
                     ) {
                         OutlinedTextField(
                             value = salePriceStr,
-                            onValueChange = { salePriceStr = it },
+                            onValueChange = {
+                                salePriceStr = it
+                                isSalePriceManuallyEdited = it.isNotBlank()
+                            },
                             label = { Text("Precio Venta Combo ($) *") },
                             leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1338,7 +1363,10 @@ fun ProductFormDialog(
                     ) {
                         OutlinedTextField(
                             value = salePriceStr,
-                            onValueChange = { salePriceStr = it },
+                            onValueChange = {
+                                salePriceStr = it
+                                isSalePriceManuallyEdited = it.isNotBlank()
+                            },
                             label = { Text("Precio de Venta ($) *") },
                             leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1383,6 +1411,28 @@ fun ProductFormDialog(
                         )
                     }
 
+                    if (initialProduct == null && isMinProfitMarginEnabled && minProfitMarginPercent > 0.0) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF10B981).copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color(0xFF059669), modifier = Modifier.size(16.dp))
+                                Text(
+                                    text = "Ganancia mínima automática activa (+${String.format("%.1f", minProfitMarginPercent).removeSuffix(".0")}%). Ingresa el costo para calcular el precio de venta.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF047857)
+                                )
+                            }
+                        }
+                    }
+
                     // Quick Margin Presets
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1400,6 +1450,7 @@ fun ProductFormDialog(
                                     if (costPrice > 0) {
                                         val calcSale = costPrice * (1 + pct / 100.0)
                                         salePriceStr = String.format("%.2f", calcSale).replace(",", ".")
+                                        isSalePriceManuallyEdited = true
                                     }
                                 },
                                 label = { Text("+$pct%", fontSize = 11.sp) },

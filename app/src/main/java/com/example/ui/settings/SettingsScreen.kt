@@ -6,11 +6,13 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,7 +22,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -90,6 +94,8 @@ fun SettingsScreen(viewModel: PosViewModel) {
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val isCashRegisterCommissionEnabled by viewModel.isCashRegisterCommissionEnabled.collectAsStateWithLifecycle()
     val commissionEnabledRegisters by viewModel.commissionEnabledRegisters.collectAsStateWithLifecycle()
+    val isMinProfitMarginEnabled by viewModel.isMinProfitMarginEnabled.collectAsStateWithLifecycle()
+    val minProfitMarginPercent by viewModel.minProfitMarginPercent.collectAsStateWithLifecycle()
 
     val cloudUsername by viewModel.cloudUsername.collectAsStateWithLifecycle()
     val cloudPassword by viewModel.cloudPassword.collectAsStateWithLifecycle()
@@ -101,6 +107,13 @@ fun SettingsScreen(viewModel: PosViewModel) {
 
     var editCashRegisterCommissionEnabled by remember(isCashRegisterCommissionEnabled) { mutableStateOf(isCashRegisterCommissionEnabled) }
     var editCommissionEnabledRegisters by remember(commissionEnabledRegisters) { mutableStateOf(commissionEnabledRegisters) }
+    var editMinProfitMarginEnabled by remember(isMinProfitMarginEnabled) { mutableStateOf(isMinProfitMarginEnabled) }
+    var editMinProfitMarginPercentStr by remember(minProfitMarginPercent) {
+        mutableStateOf(
+            if (minProfitMarginPercent % 1.0 == 0.0) minProfitMarginPercent.toInt().toString()
+            else String.format(Locale.US, "%.1f", minProfitMarginPercent)
+        )
+    }
 
     var regName by remember(currentStoreName) {
         mutableStateOf(if (currentStoreName != "Mi Tienda") currentStoreName else "")
@@ -116,6 +129,8 @@ fun SettingsScreen(viewModel: PosViewModel) {
     }
     var regError by remember { mutableStateOf("") }
 
+    var editName by remember(currentStoreName) { mutableStateOf(currentStoreName) }
+    var editRif by remember(currentStoreRif) { mutableStateOf(currentStoreRif) }
     var editPhone by remember(currentStorePhone) { mutableStateOf(currentStorePhone) }
     var editAddress by remember(currentStoreAddress) { mutableStateOf(currentStoreAddress) }
     var editCashRegisterNumber by remember(currentCashRegisterNumber) { mutableStateOf(currentCashRegisterNumber) }
@@ -578,50 +593,32 @@ fun SettingsScreen(viewModel: PosViewModel) {
                     }
 
                     Text(
-                        "Datos Inmutables de la Empresa (Registro Único)",
+                        "Datos de la Empresa",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
                     OutlinedTextField(
-                        value = currentStoreName,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Nombre de la Empresa (Inmutable)") },
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Nombre de la Empresa") },
                         leadingIcon = { Icon(Icons.Filled.Business, contentDescription = null) },
-                        trailingIcon = {
-                            Icon(Icons.Filled.Lock, contentDescription = "Bloqueado", tint = Color(0xFF059669))
-                        },
-                        supportingText = {
-                            Text("🔒 Registro único permanente. No se puede modificar.", color = Color(0xFF059669))
-                        },
+                        trailingIcon = { Icon(Icons.Filled.Edit, contentDescription = "Editable") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                        )
+                        shape = RoundedCornerShape(12.dp)
                     )
 
                     OutlinedTextField(
-                        value = currentStoreRif,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("RIF / Documento Fiscal (Inmutable)") },
+                        value = editRif,
+                        onValueChange = { editRif = it.uppercase() },
+                        label = { Text("RIF / Documento Fiscal") },
                         leadingIcon = { Icon(Icons.Filled.Badge, contentDescription = null) },
-                        trailingIcon = {
-                            Icon(Icons.Filled.Lock, contentDescription = "Bloqueado", tint = Color(0xFF059669))
-                        },
-                        supportingText = {
-                            Text("🔒 Registro único permanente. No se puede modificar.", color = Color(0xFF059669))
-                        },
+                        trailingIcon = { Icon(Icons.Filled.Edit, contentDescription = "Editable") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            disabledBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                        )
+                        shape = RoundedCornerShape(12.dp)
                     )
 
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
@@ -631,11 +628,6 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        "La dirección y el número de teléfono sí se pueden modificar cuando sea necesario.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     OutlinedTextField(
@@ -673,16 +665,20 @@ fun SettingsScreen(viewModel: PosViewModel) {
 
                     Button(
                         onClick = {
-                            viewModel.updateCompanyContact(editPhone, editAddress)
-                            viewModel.setCashRegisterNumber(editCashRegisterNumber)
-                            Toast.makeText(context, "Datos del negocio y caja actualizados correctamente", Toast.LENGTH_SHORT).show()
+                            val res = viewModel.updateCompanyProfile(editName, editRif, editPhone, editAddress)
+                            res.onSuccess {
+                                viewModel.setCashRegisterNumber(editCashRegisterNumber)
+                                Toast.makeText(context, "Datos de la empresa y caja actualizados correctamente", Toast.LENGTH_SHORT).show()
+                            }.onFailure { err ->
+                                Toast.makeText(context, err.message ?: "Error al actualizar empresa", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Filled.Save, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Guardar Cambios del Negocio y Caja")
+                        Text("Guardar Cambios de la Empresa y Caja")
                     }
                 }
             }
@@ -791,6 +787,157 @@ fun SettingsScreen(viewModel: PosViewModel) {
                                 Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("Eliminar Logo")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- OPTIONAL MINIMUM FIXED PROFIT PERCENTAGE ---
+        if (isAdmin || currentUser?.role == "SUPERVISOR") {
+            Text(
+                "Ganancia Mínima Automática (Opcional)",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)),
+                border = BorderStroke(
+                    1.dp,
+                    if (editMinProfitMarginEnabled) Color(0xFF10B981).copy(alpha = 0.4f)
+                    else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f).padding(end = 12.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.TrendingUp,
+                                contentDescription = null,
+                                tint = if (editMinProfitMarginEnabled) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Column {
+                                Text(
+                                    "Calcular Precio de Venta Automáticamente",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                                Text(
+                                    "Si está activo, al agregar un producto (manual o por voz) indicando solo el costo, se calculará el precio de venta usando este % mínimo.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = editMinProfitMarginEnabled,
+                            onCheckedChange = { enabled ->
+                                editMinProfitMarginEnabled = enabled
+                                val parsedPct = editMinProfitMarginPercentStr.replace(",", ".").toDoubleOrNull()?.coerceAtLeast(0.0) ?: 30.0
+                                viewModel.setMinProfitMarginSettings(enabled = enabled, percent = parsedPct)
+                                Toast.makeText(
+                                    context,
+                                    if (enabled) "Ganancia mínima automática activada ($parsedPct%)" else "Ganancia mínima automática desactivada",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            modifier = Modifier.testTag("settings_min_profit_switch")
+                        )
+                    }
+
+                    AnimatedVisibility(visible = editMinProfitMarginEnabled) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+
+                            OutlinedTextField(
+                                value = editMinProfitMarginPercentStr,
+                                onValueChange = { editMinProfitMarginPercentStr = it },
+                                label = { Text("Porcentaje de Ganancia Fija Mínima (%)") },
+                                placeholder = { Text("Ej: 30") },
+                                leadingIcon = { Icon(Icons.Filled.Percent, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_min_profit_input")
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Rápido:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                listOf(15, 20, 30, 40, 50).forEach { pct ->
+                                    SuggestionChip(
+                                        onClick = { editMinProfitMarginPercentStr = pct.toString() },
+                                        label = { Text("$pct%", fontSize = 11.sp) },
+                                        modifier = Modifier.height(30.dp)
+                                    )
+                                }
+                            }
+
+                            val previewPct = editMinProfitMarginPercentStr.replace(",", ".").toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+                            val exampleCost = 10.0
+                            val exampleSale = exampleCost * (1.0 + previewPct / 100.0)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.1f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.25f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Ejemplo: Si un producto cuesta \$10.00 y el % mínimo es ${String.format("%.1f", previewPct).removeSuffix(".0")}%, el precio de venta sugerido será \$${String.format("%.2f", exampleSale)}.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF047857),
+                                    modifier = Modifier.padding(10.dp)
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    val parsedPct = editMinProfitMarginPercentStr.replace(",", ".").toDoubleOrNull()
+                                    if (parsedPct == null || parsedPct < 0.0) {
+                                        Toast.makeText(context, "Ingresa un porcentaje válido (>= 0)", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.setMinProfitMarginSettings(
+                                            enabled = editMinProfitMarginEnabled,
+                                            percent = parsedPct
+                                        )
+                                        Toast.makeText(
+                                            context,
+                                            "Ganancia mínima automática guardada (${String.format("%.1f", parsedPct).removeSuffix(".0")}%)",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("settings_save_min_profit_button"),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                            ) {
+                                Icon(Icons.Filled.Save, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Guardar Ganancia Mínima")
                             }
                         }
                     }

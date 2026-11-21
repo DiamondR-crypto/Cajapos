@@ -20,6 +20,7 @@ data class Sale(
     val paymentMobileBs: Double,
     val paymentCardBs: Double,
     val paymentCreditUsd: Double = 0.0,
+    val paymentCasheaUsd: Double = 0.0,
     val isCreditPaid: Boolean = false,
     val creditPaidAmountUsd: Double = 0.0,
     val creditDueDate: Long = 0L,

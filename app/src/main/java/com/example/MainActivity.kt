@@ -7,17 +7,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.room.Room
 import com.example.data.local.AppDatabase
 import com.example.data.local.PreferencesManager
 import com.example.data.repository.AppRepository
 import com.example.data.repository.GeminiRepository
 import com.example.data.repository.CloudSyncRepository
-
+import com.example.data.repository.FirestoreSyncRepository
 import com.example.ui.MainApp
 import com.example.ui.PosViewModel
 import com.example.ui.theme.MyApplicationTheme
-
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -30,9 +28,9 @@ class MainActivity : ComponentActivity() {
                 val prefs = PreferencesManager(applicationContext)
                 val repository = AppRepository(database, prefs)
                 val cloudSyncRepository = CloudSyncRepository(repository)
+                val firestoreSyncRepository = FirestoreSyncRepository(repository, applicationContext)
                 val geminiRepository = GeminiRepository(prefs)
-                return PosViewModel(repository, geminiRepository, cloudSyncRepository) as T
-
+                return PosViewModel(repository, geminiRepository, cloudSyncRepository, firestoreSyncRepository) as T
             }
         }
     }

@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -136,13 +137,21 @@ fun DashboardScreen(viewModel: PosViewModel) {
         monthPurchaseInvoices.sumOf { inv -> if (inv.description.contains("unid", ignoreCase = true)) 10.0 else 1.0 }
     }
 
-    // Current Inventory Status
-    val totalAvailableStockUnits = remember(allProducts) {
-        allProducts.filter { !it.isCombo && !it.isRecipe }.sumOf { it.stock }
+    // Current Inventory Status & Capital Valuation
+    val inventoryValuation = remember(allProducts) {
+        calculateInventoryValuation(allProducts)
     }
-
-    val unitProductsCount = remember(allProducts) {
-        allProducts.count { !it.isCombo && !it.isRecipe }
+    val totalAvailableStockUnits = inventoryValuation.totalStockUnits
+    val unitProductsCount = inventoryValuation.unitProductsCount
+    val netInvestedCapitalUsd = inventoryValuation.netInvestedCapitalUsd
+    val totalRetailInventoryValueUsd = inventoryValuation.totalRetailValueUsd
+    val netInvestedCapitalBs = netInvestedCapitalUsd * bcvRate
+    val totalRetailInventoryValueBs = totalRetailInventoryValueUsd * bcvRate
+    val projectedInventoryGainUsd = totalRetailInventoryValueUsd - netInvestedCapitalUsd
+    val projectedInventoryMarginPct = if (totalRetailInventoryValueUsd > 0.001) {
+        (projectedInventoryGainUsd / totalRetailInventoryValueUsd) * 100.0
+    } else {
+        0.0
     }
 
     val recipeComboCount = remember(allProducts) {
@@ -198,13 +207,15 @@ fun DashboardScreen(viewModel: PosViewModel) {
     val paymentCashUsd = remember(monthSales) { monthSales.sumOf { it.paymentCashUsd } }
     val paymentMobileBs = remember(monthSales) { monthSales.sumOf { it.paymentMobileBs } }
     val paymentCardBs = remember(monthSales) { monthSales.sumOf { it.paymentCardBs } }
+    val paymentCasheaUsd = remember(monthSales) { monthSales.sumOf { it.paymentCasheaUsd } }
     val paymentCreditUsd = remember(monthSales) { monthSales.sumOf { it.paymentCreditUsd } }
 
-    val paymentBreakdown = remember(paymentCashUsd, paymentMobileBs, paymentCardBs, paymentCreditUsd, bcvRate) {
+    val paymentBreakdown = remember(paymentCashUsd, paymentMobileBs, paymentCardBs, paymentCasheaUsd, paymentCreditUsd, bcvRate) {
         mapOf(
             "Efectivo USD" to paymentCashUsd,
             "Pago Móvil" to (if (bcvRate > 0) paymentMobileBs / bcvRate else 0.0),
             "Punto de Venta" to (if (bcvRate > 0) paymentCardBs / bcvRate else 0.0),
+            "Cashea" to paymentCasheaUsd,
             "Ventas a Crédito" to paymentCreditUsd
         )
     }
@@ -377,6 +388,17 @@ fun DashboardScreen(viewModel: PosViewModel) {
                         gradient = listOf(Color(0xFF78350F), Color(0xFF451A03))
                     )
                 }
+
+                // Card 5: Valorización de Inventario (Capital Neto Invertido vs Precio de Venta Total)
+                InventoryCapitalValuationCard(
+                    netInvestedCapitalUsd = netInvestedCapitalUsd,
+                    netInvestedCapitalBs = netInvestedCapitalBs,
+                    totalRetailValueUsd = totalRetailInventoryValueUsd,
+                    totalRetailValueBs = totalRetailInventoryValueBs,
+                    projectedGainUsd = projectedInventoryGainUsd,
+                    projectedMarginPct = projectedInventoryMarginPct,
+                    valuedProductsCount = inventoryValuation.valuedProductsCount
+                )
             }
         }
 
@@ -712,3 +734,189 @@ private fun FinancialKpiCard(
         }
     }
 }
+
+data class InventoryValuationSummary(
+    val netInvestedCapitalUsd: Double,
+    val totalRetailValueUsd: Double,
+    val totalStockUnits: Double,
+    val unitProductsCount: Int,
+    val valuedProductsCount: Int
+)
+
+fun calculateInventoryValuation(products: List<Product>): InventoryValuationSummary {
+    val physicalProducts = products.filter { !it.isCombo && !it.isRecipe }
+    val inStockProducts = physicalProducts.filter { it.stock > 0.0 }
+    val netCapitalUsd = inStockProducts.sumOf { it.stock * it.costPriceUsd }
+    val retailValueUsd = inStockProducts.sumOf { it.stock * it.priceUsd }
+    val totalUnits = physicalProducts.sumOf { it.stock }
+    return InventoryValuationSummary(
+        netInvestedCapitalUsd = netCapitalUsd,
+        totalRetailValueUsd = retailValueUsd,
+        totalStockUnits = totalUnits,
+        unitProductsCount = physicalProducts.size,
+        valuedProductsCount = inStockProducts.size
+    )
+}
+
+@Composable
+private fun InventoryCapitalValuationCard(
+    netInvestedCapitalUsd: Double,
+    netInvestedCapitalBs: Double,
+    totalRetailValueUsd: Double,
+    totalRetailValueBs: Double,
+    projectedGainUsd: Double,
+    projectedMarginPct: Double,
+    valuedProductsCount: Int
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("dashboard_capital_valuation_card"),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.Transparent
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF0F172A), Color(0xFF1E293B))))
+                .border(1.dp, Color(0xFF38BDF8).copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                .padding(16.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF38BDF8).copy(alpha = 0.2f),
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.AccountBalance,
+                                    contentDescription = null,
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "VALORIZACIÓN DEL INVENTARIO ACTUAL",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                            Text(
+                                text = "$valuedProductsCount productos físicos con stock disponible",
+                                fontSize = 10.sp,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF10B981).copy(alpha = 0.18f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = String.format(Locale.US, "+$%.2f est. (%.1f%%)", projectedGainUsd, projectedMarginPct),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF34D399),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Capital Neto Invertido (al Costo)
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White.copy(alpha = 0.06f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.25f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "CAPITAL NETO INVERTIDO",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF7DD3FC)
+                            )
+                            Text(
+                                text = String.format(Locale.US, "$%.2f USD", netInvestedCapitalUsd),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = String.format(Locale.US, "Bs. %.2f", netInvestedCapitalBs),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF38BDF8)
+                            )
+                            Text(
+                                text = "Calculado al precio de costo",
+                                fontSize = 9.5.sp,
+                                color = Color.White.copy(alpha = 0.55f)
+                            )
+                        }
+                    }
+
+                    // Valor Total a Precio de Venta
+                    Surface(
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White.copy(alpha = 0.06f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.25f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "VALOR EN PRECIO DE VENTA",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF6EE7B7)
+                            )
+                            Text(
+                                text = String.format(Locale.US, "$%.2f USD", totalRetailValueUsd),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = String.format(Locale.US, "Bs. %.2f", totalRetailValueBs),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF34D399)
+                            )
+                            Text(
+                                text = "Proyección total de venta",
+                                fontSize = 9.5.sp,
+                                color = Color.White.copy(alpha = 0.55f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

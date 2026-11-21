@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -12,6 +13,8 @@ import androidx.core.content.FileProvider
 import com.example.data.local.DeliveryNote
 import com.example.data.local.DeliveryNoteItem
 import com.example.data.local.PreferencesManager
+import com.example.data.local.Quote
+import com.example.data.local.QuoteItem
 import com.example.data.local.Sale
 import com.example.data.local.SaleItem
 import java.io.File
@@ -205,6 +208,11 @@ object TicketUtils {
         }
         if (sale.paymentCardBs > 0) {
             canvas.drawText("Punto / Tarjeta: Bs. ${String.format("%.2f", sale.paymentCardBs)}", xRight, y, paint)
+            y += if (is80mm) 22f else 18f
+        }
+        if (sale.paymentCasheaUsd > 0.001) {
+            val casheaBs = sale.paymentCasheaUsd * rate
+            canvas.drawText("Cashea: Bs. ${String.format("%.2f", casheaBs)}", xRight, y, paint)
             y += if (is80mm) 22f else 18f
         }
         if (sale.paymentCreditUsd > 0.001) {
@@ -701,6 +709,478 @@ object TicketUtils {
         }
     }
 
+    /**
+     * Genera el bitmap térmico de Presupuesto / Cotización (58mm o 80mm).
+     */
+    fun generateQuoteTicketBitmap(
+        context: Context,
+        prefs: PreferencesManager,
+        quote: Quote,
+        items: List<QuoteItem>,
+        customWidthPx: Int? = null
+    ): Bitmap {
+        val is80mm = customWidthPx == 576 || (customWidthPx == null && prefs.printerPaperWidth.contains("80"))
+        val width = if (is80mm) 576 else 384
+        val baseLineHeight = if (is80mm) 30 else 24
+        val notesLines = if (quote.notesOrConditions.isNotBlank()) 3 else 0
+        val height = (if (is80mm) 980 else 820) + ((items.size + notesLines) * baseLineHeight)
+
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+
+        val paint = Paint().apply {
+            color = Color.BLACK
+            textSize = if (is80mm) 18f else 15f
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+            typeface = Typeface.MONOSPACE
+        }
+
+        var y = if (is80mm) 44f else 36f
+        val xCenter = width / 2f
+        val xLeft = if (is80mm) 28f else 18f
+        val xRight = width - (if (is80mm) 28f else 18f)
+
+        // Banner - Quote Non-Fiscal Header
+        paint.isFakeBoldText = true
+        paint.textSize = if (is80mm) 18f else 14f
+        canvas.drawText("--- PRESUPUESTO / COTIZACIÓN ---", xCenter, y, paint)
+        y += if (is80mm) 20f else 16f
+        paint.textSize = if (is80mm) 13f else 10.5f
+        paint.isFakeBoldText = false
+        canvas.drawText("DOCUMENTO NO VÁLIDO COMO FACTURA FISCAL", xCenter, y, paint)
+        y += if (is80mm) 24f else 18f
+
+        // Store Info
+        paint.textSize = if (is80mm) 24f else 19f
+        paint.isFakeBoldText = true
+        canvas.drawText(prefs.storeName.ifBlank { "MI COMERCIO POS" }, xCenter, y, paint)
+        y += if (is80mm) 28f else 22f
+
+        paint.textSize = if (is80mm) 16f else 13f
+        paint.isFakeBoldText = false
+        canvas.drawText("RIF: ${prefs.storeRif.ifBlank { "J-00000000-0" }}", xCenter, y, paint)
+        y += if (is80mm) 22f else 18f
+        if (prefs.storeAddress.isNotBlank()) {
+            canvas.drawText(prefs.storeAddress, xCenter, y, paint)
+            y += if (is80mm) 22f else 18f
+        }
+        if (prefs.storePhone.isNotBlank()) {
+            canvas.drawText("Telf: ${prefs.storePhone}", xCenter, y, paint)
+            y += if (is80mm) 24f else 18f
+        }
+        y += if (is80mm) 10f else 6f
+
+        // Document Info
+        paint.textAlign = Paint.Align.LEFT
+        val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+        val sdfDate = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        canvas.drawText("Emisión: ${sdf.format(Date(quote.timestamp))}", xLeft, y, paint)
+        y += if (is80mm) 22f else 18f
+
+        if (quote.validUntil > 0L) {
+            canvas.drawText("Válido hasta: ${sdfDate.format(Date(quote.validUntil))} (${quote.validityDays} días)", xLeft, y, paint)
+            y += if (is80mm) 22f else 18f
+        }
+
+        paint.isFakeBoldText = true
+        canvas.drawText("Presupuesto N°: ${quote.quoteNumber.ifBlank { "PRE-${quote.id}" }}", xLeft, y, paint)
+        paint.isFakeBoldText = false
+        y += if (is80mm) 22f else 18f
+
+        val cashierDisplay = quote.cashierName.ifBlank { "Cajero" }
+        val registerDisplay = quote.cashRegisterNumber.ifBlank { prefs.cashRegisterNumber.ifBlank { "01" } }
+        canvas.drawText("Caja: $registerDisplay  •  Atendido por: $cashierDisplay", xLeft, y, paint)
+        y += if (is80mm) 22f else 18f
+
+        canvas.drawText("Cliente: ${quote.customerName.ifBlank { "Consumidor Final" }}", xLeft, y, paint)
+        y += if (is80mm) 22f else 18f
+        canvas.drawText("CI/RIF: ${quote.customerDocument.ifBlank { "V-00000000" }}", xLeft, y, paint)
+        y += if (is80mm) 24f else 20f
+
+        val rate = if (quote.rateBcv > 0.001) quote.rateBcv else 1.0
+
+        // Column Titles
+        paint.isFakeBoldText = true
+        paint.textSize = if (is80mm) 16f else 13f
+        canvas.drawText("Cant / Descripción", xLeft, y, paint)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText("Total Bs.", xRight, y, paint)
+        paint.textAlign = Paint.Align.LEFT
+        y += if (is80mm) 10f else 8f
+        paint.isFakeBoldText = false
+        canvas.drawLine(xLeft, y, xRight, y, paint)
+        y += if (is80mm) 24f else 19f
+
+        for (item in items) {
+            val exemptTag = if (item.isTaxExempt) " (E)" else ""
+            val line = "${item.quantity}x ${item.productName}$exemptTag"
+            canvas.drawText(line, xLeft, y, paint)
+            paint.textAlign = Paint.Align.RIGHT
+            val itemTotalBs = item.priceUsd * rate * item.quantity
+            canvas.drawText(String.format("Bs. %.2f", itemTotalBs), xRight, y, paint)
+            paint.textAlign = Paint.Align.LEFT
+            y += if (is80mm) 24f else 19f
+        }
+
+        y += if (is80mm) 8f else 6f
+        canvas.drawLine(xLeft, y, xRight, y, paint)
+        y += if (is80mm) 24f else 19f
+
+        paint.textAlign = Paint.Align.RIGHT
+        paint.textSize = if (is80mm) 16f else 13f
+
+        val baseTaxableBs = quote.baseTaxableUsd * rate
+        val baseExemptBs = quote.baseExemptUsd * rate
+        val ivaBs = quote.ivaUsd * rate
+        val totalBsCalculated = if (quote.totalBs > 0.001) quote.totalBs else quote.totalUsd * rate
+
+        canvas.drawText("Tasa BCV del Día: Bs. ${String.format("%.2f", rate)}", xRight, y, paint)
+        y += if (is80mm) 22f else 18f
+        canvas.drawText("Base Imponible (16%): Bs. ${String.format("%.2f", baseTaxableBs)}", xRight, y, paint)
+        y += if (is80mm) 22f else 18f
+        if (quote.discountUsd > 0.001) {
+            val discountBs = quote.discountUsd * rate
+            canvas.drawText("Descuento (pre-IVA): -Bs. ${String.format("%.2f", discountBs)}", xRight, y, paint)
+            y += if (is80mm) 22f else 18f
+        }
+        if (baseExemptBs > 0.001) {
+            canvas.drawText("Monto Exento (0%): Bs. ${String.format("%.2f", baseExemptBs)}", xRight, y, paint)
+            y += if (is80mm) 22f else 18f
+        }
+        canvas.drawText("IVA (16%): Bs. ${String.format("%.2f", ivaBs)}", xRight, y, paint)
+        y += if (is80mm) 26f else 20f
+
+        paint.textSize = if (is80mm) 20f else 16f
+        paint.isFakeBoldText = true
+        canvas.drawText("TOTAL PRESUPUESTO: Bs. ${String.format("%.2f", totalBsCalculated)}", xRight, y, paint)
+        y += if (is80mm) 24f else 20f
+
+        paint.textSize = if (is80mm) 16f else 13f
+        paint.isFakeBoldText = false
+        canvas.drawText("Equivalente USD: \$${String.format("%.2f", quote.totalUsd)}", xRight, y, paint)
+        y += if (is80mm) 24f else 20f
+
+        if (quote.notesOrConditions.isNotBlank()) {
+            paint.textAlign = Paint.Align.LEFT
+            paint.textSize = if (is80mm) 14f else 11.5f
+            canvas.drawText("Obs: ${quote.notesOrConditions.take(45)}", xLeft, y, paint)
+            y += if (is80mm) 22f else 18f
+        }
+
+        y += if (is80mm) 14f else 10f
+        paint.textAlign = Paint.Align.CENTER
+        paint.textSize = if (is80mm) 14f else 11.5f
+        canvas.drawText("Precios referenciales sujetos a disponibilidad", xCenter, y, paint)
+        y += if (is80mm) 20f else 16f
+        canvas.drawText("y variación de tasa BCV al momento de compra.", xCenter, y, paint)
+
+        return Bitmap.createBitmap(bitmap, 0, 0, width, (y + 35).toInt())
+    }
+
+    /**
+     * Genera la imagen cuadrada de Presupuesto lista para compartir por WhatsApp.
+     */
+    fun generateWhatsAppSquareQuoteBitmap(
+        context: Context,
+        prefs: PreferencesManager,
+        quote: Quote,
+        items: List<QuoteItem>
+    ): Bitmap {
+        val width = 800
+        val headerHeight = 300
+        val itemRowHeight = 42
+        val tableHeaderHeight = 44
+        val notesExtraHeight = if (quote.notesOrConditions.isNotBlank()) 56 else 0
+        val totalsHeight = 250 + notesExtraHeight
+        val contentHeight = headerHeight + tableHeaderHeight + (items.size * itemRowHeight) + totalsHeight + 60
+        val height = contentHeight.coerceAtLeast(820)
+
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        canvas.drawColor(Color.parseColor("#F8FAFC"))
+
+        val paint = Paint().apply {
+            isAntiAlias = true
+            typeface = Typeface.DEFAULT
+        }
+
+        val cardMargin = 20f
+        val cardPaint = Paint().apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val borderPaint = Paint().apply {
+            color = Color.parseColor("#CBD5E1")
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            isAntiAlias = true
+        }
+        canvas.drawRoundRect(cardMargin, cardMargin, width - cardMargin, height - cardMargin, 20f, 20f, cardPaint)
+        canvas.drawRoundRect(cardMargin, cardMargin, width - cardMargin, height - cardMargin, 20f, 20f, borderPaint)
+
+        var y = 50f
+
+        // 1. Quote Banner Header
+        val bannerPaint = Paint().apply {
+            color = Color.parseColor("#EFF6FF")
+            style = Paint.Style.FILL
+        }
+        val bannerBorderPaint = Paint().apply {
+            color = Color.parseColor("#93C5FD")
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f
+        }
+        canvas.drawRoundRect(40f, y, width - 40f, y + 44f, 10f, 10f, bannerPaint)
+        canvas.drawRoundRect(40f, y, width - 40f, y + 44f, 10f, 10f, bannerBorderPaint)
+
+        paint.color = Color.parseColor("#1E40AF")
+        paint.textSize = 17f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("PRESUPUESTO / COTIZACIÓN • NO VÁLIDO COMO FACTURA", width / 2f, y + 28f, paint)
+
+        y += 66f
+
+        // 2. Company Info vs Logo
+        val leftX = 45f
+        val logoWidth = 130f
+        val logoHeight = 130f
+        val logoX = width - 45f - logoWidth
+        val logoY = y
+
+        var hasLogo = false
+        if (prefs.storeLogoPath.isNotBlank()) {
+            try {
+                val logoFile = File(prefs.storeLogoPath)
+                if (logoFile.exists()) {
+                    val originalBitmap = android.graphics.BitmapFactory.decodeFile(logoFile.absolutePath)
+                    if (originalBitmap != null) {
+                        val scaledLogo = Bitmap.createScaledBitmap(originalBitmap, logoWidth.toInt(), logoHeight.toInt(), true)
+                        canvas.drawBitmap(scaledLogo, logoX, logoY, null)
+                        hasLogo = true
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        if (!hasLogo) {
+            val placeholderPaint = Paint().apply {
+                color = Color.parseColor("#F1F5F9")
+                style = Paint.Style.FILL
+            }
+            val placeholderBorder = Paint().apply {
+                color = Color.parseColor("#E2E8F0")
+                style = Paint.Style.STROKE
+                strokeWidth = 1.5f
+            }
+            canvas.drawRoundRect(logoX, logoY, logoX + logoWidth, logoY + logoHeight, 16f, 16f, placeholderPaint)
+            canvas.drawRoundRect(logoX, logoY, logoX + logoWidth, logoY + logoHeight, 16f, 16f, placeholderBorder)
+
+            paint.color = Color.parseColor("#94A3B8")
+            paint.textSize = 12f
+            paint.textAlign = Paint.Align.CENTER
+            canvas.drawText("LOGO", logoX + (logoWidth / 2f), logoY + (logoHeight / 2f) - 5f, paint)
+            canvas.drawText("COMERCIO", logoX + (logoWidth / 2f), logoY + (logoHeight / 2f) + 12f, paint)
+        }
+
+        paint.textAlign = Paint.Align.LEFT
+        paint.color = Color.parseColor("#0F172A")
+        paint.textSize = 24f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText(prefs.storeName.ifBlank { "MI COMERCIO POS" }.take(22), leftX, y + 25f, paint)
+
+        paint.textSize = 15f
+        paint.typeface = Typeface.DEFAULT
+        paint.color = Color.parseColor("#334155")
+        canvas.drawText("RIF: ${prefs.storeRif.ifBlank { "J-00000000-0" }}", leftX, y + 52f, paint)
+        if (prefs.storeAddress.isNotBlank()) {
+            canvas.drawText(prefs.storeAddress.take(30), leftX, y + 74f, paint)
+        }
+        if (prefs.storePhone.isNotBlank()) {
+            canvas.drawText("Telf: ${prefs.storePhone}", leftX, y + 96f, paint)
+        }
+
+        y += 140f
+
+        // 3. Quote Meta Info Box
+        val metaPaint = Paint().apply {
+            color = Color.parseColor("#F8FAFC")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(40f, y, width - 40f, y + 72f, 10f, 10f, metaPaint)
+
+        val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+        val sdfDate = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        val dateStr = sdf.format(Date(quote.timestamp))
+        val validStr = if (quote.validUntil > 0L) "${sdfDate.format(Date(quote.validUntil))} (${quote.validityDays} días)" else "${quote.validityDays} días"
+
+        paint.textSize = 14f
+        paint.color = Color.parseColor("#1E40AF")
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Presupuesto N°: ${quote.quoteNumber.ifBlank { "PRE-${quote.id}" }}", leftX + 10f, y + 23f, paint)
+
+        paint.typeface = Typeface.DEFAULT
+        paint.color = Color.parseColor("#64748B")
+        canvas.drawText("Emisión: $dateStr", leftX + 10f, y + 43f, paint)
+        canvas.drawText("Válido hasta: $validStr", leftX + 10f, y + 62f, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
+        paint.color = Color.parseColor("#0F172A")
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        val customerDisplay = quote.customerName.ifBlank { "Consumidor Final" }.take(22)
+        canvas.drawText("Cliente: $customerDisplay", width - 50f, y + 23f, paint)
+
+        paint.typeface = Typeface.DEFAULT
+        paint.color = Color.parseColor("#64748B")
+        canvas.drawText("CI/RIF: ${quote.customerDocument.ifBlank { "V-00000000" }}", width - 50f, y + 43f, paint)
+        if (quote.customerPhone.isNotBlank()) {
+            canvas.drawText("Telf: ${quote.customerPhone}", width - 50f, y + 62f, paint)
+        }
+
+        y += 86f
+
+        // 4. Products Table Header
+        val rate = if (quote.rateBcv > 0.001) quote.rateBcv else 1.0
+
+        val tableHeaderPaint = Paint().apply {
+            color = Color.parseColor("#1E3A8A")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(40f, y, width - 40f, y + tableHeaderHeight, 8f, 8f, tableHeaderPaint)
+
+        paint.color = Color.WHITE
+        paint.textSize = 14f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+        paint.textAlign = Paint.Align.LEFT
+        canvas.drawText("Producto", leftX + 10f, y + 28f, paint)
+
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("Cant.", 380f, y + 28f, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText("P. Unit (Sin IVA)", 580f, y + 28f, paint)
+        canvas.drawText("Total Bs.", width - 50f, y + 28f, paint)
+
+        y += tableHeaderHeight + 8f
+
+        paint.color = Color.parseColor("#1E293B")
+        paint.typeface = Typeface.DEFAULT
+        val rowLinePaint = Paint().apply {
+            color = Color.parseColor("#E2E8F0")
+            strokeWidth = 1f
+        }
+
+        for (item in items) {
+            val itemPriceBsTotal = item.priceUsd * rate
+            val unitPriceNoTaxBs = if (!item.isTaxExempt) itemPriceBsTotal / 1.16 else itemPriceBsTotal
+            val lineTotalBs = itemPriceBsTotal * item.quantity
+
+            val exemptMark = if (item.isTaxExempt) " (E)" else ""
+            val productNameDisplay = "${item.productName.take(20)}$exemptMark"
+
+            paint.textAlign = Paint.Align.LEFT
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            paint.textSize = 14f
+            canvas.drawText(productNameDisplay, leftX + 10f, y + 26f, paint)
+
+            paint.typeface = Typeface.DEFAULT
+            paint.textAlign = Paint.Align.CENTER
+            canvas.drawText("${item.quantity}", 380f, y + 26f, paint)
+
+            paint.textAlign = Paint.Align.RIGHT
+            canvas.drawText(String.format("Bs. %.2f", unitPriceNoTaxBs), 580f, y + 26f, paint)
+
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText(String.format("Bs. %.2f", lineTotalBs), width - 50f, y + 26f, paint)
+
+            y += itemRowHeight
+            canvas.drawLine(40f, y, width - 40f, y, rowLinePaint)
+            y += 4f
+        }
+
+        y += 15f
+
+        // 5. Totals Breakdown Box
+        val subtotalBs = quote.baseTaxableUsd * rate
+        val baseExemptBs = quote.baseExemptUsd * rate
+        val discountBs = quote.discountUsd * rate
+        val ivaBs = quote.ivaUsd * rate
+        val totalBs = if (quote.totalBs > 0.001) quote.totalBs else quote.totalUsd * rate
+
+        paint.textAlign = Paint.Align.RIGHT
+        paint.textSize = 14f
+        paint.color = Color.parseColor("#475569")
+
+        canvas.drawText("Base Imponible (Sin IVA): Bs. ${String.format("%.2f", subtotalBs)}", width - 50f, y, paint)
+        y += 22f
+
+        if (discountBs > 0.001) {
+            paint.color = Color.parseColor("#059669")
+            canvas.drawText("Descuento (Pre-IVA): -Bs. ${String.format("%.2f", discountBs)}", width - 50f, y, paint)
+            y += 22f
+            paint.color = Color.parseColor("#475569")
+        }
+
+        if (baseExemptBs > 0.001) {
+            canvas.drawText("Monto Exento (0%): Bs. ${String.format("%.2f", baseExemptBs)}", width - 50f, y, paint)
+            y += 22f
+        }
+
+        canvas.drawText("IVA Fiscal (16%): Bs. ${String.format("%.2f", ivaBs)}", width - 50f, y, paint)
+        y += 28f
+
+        // Grand Total Box
+        val totalBoxPaint = Paint().apply {
+            color = Color.parseColor("#1E3A8A")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(width - 450f, y, width - 40f, y + 54f, 12f, 12f, totalBoxPaint)
+
+        paint.color = Color.WHITE
+        paint.textSize = 18f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText("TOTAL PRESUPUESTO: Bs. ${String.format("%.2f", totalBs)}", width - 60f, y + 34f, paint)
+
+        y += 68f
+
+        paint.color = Color.parseColor("#64748B")
+        paint.textSize = 13f
+        paint.typeface = Typeface.DEFAULT
+        canvas.drawText("Equivalente USD (Tasa BCV Bs. ${String.format("%.2f", rate)}): \$ ${String.format("%.2f", quote.totalUsd)}", width - 50f, y, paint)
+
+        if (quote.notesOrConditions.isNotBlank()) {
+            y += 28f
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = Color.parseColor("#334155")
+            paint.textSize = 13f
+            canvas.drawText("Observaciones: ${quote.notesOrConditions.take(75)}", 45f, y, paint)
+        }
+
+        return bitmap
+    }
+
+    fun saveQuoteBitmapToFile(context: Context, bitmap: Bitmap, quoteId: Int): File? {
+        return try {
+            val file = File(context.cacheDir, "presupuesto_$quoteId.png")
+            val out = FileOutputStream(file)
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            out.flush()
+            out.close()
+            file
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     fun getUriForFile(context: Context, file: File): Uri {
         return FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
     }
@@ -710,13 +1190,21 @@ object TicketUtils {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = mimeType
             putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, file.name)
+            clipData = ClipData.newUri(context.contentResolver, file.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             packageName?.let { setPackage(it) }
         }
         try {
-            context.startActivity(Intent.createChooser(intent, "Compartir ticket"))
+            val chooser = Intent.createChooser(intent, "Compartir archivo").apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
-            context.startActivity(Intent.createChooser(intent.apply { setPackage(null) }, "Compartir ticket"))
+            val fallbackChooser = Intent.createChooser(intent.apply { setPackage(null) }, "Compartir archivo").apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(fallbackChooser)
         }
     }
 

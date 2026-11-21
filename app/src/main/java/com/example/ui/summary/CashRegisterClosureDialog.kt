@@ -39,6 +39,7 @@ fun CashRegisterClosureDialog(
     val totalCashUsd = sales.sumOf { it.paymentCashUsd }
     val totalMobileBs = sales.sumOf { it.paymentMobileBs }
     val totalCardBs = sales.sumOf { it.paymentCardBs }
+    val totalCasheaUsd = sales.sumOf { it.paymentCasheaUsd }
 
     val generalTotalUsd = sales.sumOf { it.totalUsd }
     val generalTotalBs = sales.sumOf { it.totalBs }
@@ -130,6 +131,10 @@ fun CashRegisterClosureDialog(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Punto de Venta / Tarjeta (Bs):", style = MaterialTheme.typography.bodySmall)
                             Text("Bs. ${String.format(Locale.US, "%.2f", totalCardBs)}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Cashea ($ USD):", style = MaterialTheme.typography.bodySmall)
+                            Text("\$${String.format(Locale.US, "%.2f", totalCasheaUsd)}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
                         }
 
                         HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))

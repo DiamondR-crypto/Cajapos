@@ -314,6 +314,7 @@ class CloudSyncRepository(private val localRepository: AppRepository) {
                             paymentMobileBs = sale.paymentMobileBs,
                             paymentCardBs = sale.paymentCardBs,
                             paymentCreditUsd = sale.paymentCreditUsd,
+                            paymentCasheaUsd = sale.paymentCasheaUsd,
                             cashierName = sale.cashierName,
                             cashRegisterNumber = sale.cashRegisterNumber,
                             igtfUsd = sale.igtfUsd,
@@ -475,6 +476,7 @@ class CloudSyncRepository(private val localRepository: AppRepository) {
                                         paymentMobileBs = remoteTicket.paymentMobileBs,
                                         paymentCardBs = remoteTicket.paymentCardBs,
                                         paymentCreditUsd = remoteTicket.paymentCreditUsd,
+                                        paymentCasheaUsd = remoteTicket.paymentCasheaUsd,
                                         cashierName = remoteTicket.cashierName,
                                         cashRegisterNumber = remoteTicket.cashRegisterNumber,
                                         igtfUsd = remoteTicket.igtfUsd,
@@ -898,14 +900,24 @@ class CloudSyncRepository(private val localRepository: AppRepository) {
 
             Log.i(TAG, "RESPALDO EN LA NUBE ENCONTRADO PARA $googleAccount! Restaurando empresa '${backup.storeName}', inventario (${backup.products.size} ítems)...")
 
-            // 1. Restore Company Profile Preferences
-            if (backup.storeName.isNotBlank()) prefs.storeName = backup.storeName
-            if (backup.storeRif.isNotBlank()) prefs.storeRif = backup.storeRif
-            if (backup.storePhone.isNotBlank()) prefs.storePhone = backup.storePhone
-            if (backup.storeAddress.isNotBlank()) prefs.storeAddress = backup.storeAddress
-            if (backup.companyRegisteredAt > 0L) prefs.companyRegisteredAt = backup.companyRegisteredAt
-            prefs.companyGoogleAccount = googleAccount
-            prefs.isCompanyRegistered = true
+            // 1. Restore Company Profile Preferences (never overwrite with placeholder defaults)
+            val isBackupPlaceholder =
+                (backup.storeName.isBlank() || backup.storeName.equals("Mi Tienda", ignoreCase = true)) &&
+                (backup.storeRif.isBlank() || backup.storeRif.equals("J-00000000-0", ignoreCase = true) || backup.storeRif == "00000000")
+
+            if (!isBackupPlaceholder && backup.isCompanyRegistered) {
+                if (backup.storeName.isNotBlank() && !backup.storeName.equals("Mi Tienda", ignoreCase = true)) {
+                    prefs.storeName = backup.storeName
+                }
+                if (backup.storeRif.isNotBlank() && !backup.storeRif.equals("J-00000000-0", ignoreCase = true) && backup.storeRif != "00000000") {
+                    prefs.storeRif = backup.storeRif
+                }
+                if (backup.storePhone.isNotBlank() && backup.storePhone != "0000-0000000") prefs.storePhone = backup.storePhone
+                if (backup.storeAddress.isNotBlank() && backup.storeAddress != "Dirección") prefs.storeAddress = backup.storeAddress
+                if (backup.companyRegisteredAt > 0L) prefs.companyRegisteredAt = backup.companyRegisteredAt
+                prefs.companyGoogleAccount = googleAccount
+                prefs.isCompanyRegistered = true
+            }
 
             // 2. Restore Database Items into Room
             for (product in backup.products) {

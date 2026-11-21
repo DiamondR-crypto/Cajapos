@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -131,6 +132,7 @@ fun LoginScreen(viewModel: PosViewModel) {
                         when (state) {
                             "USER_SELECTION" -> {
                                 UserSelectionStep(
+                                    viewModel = viewModel,
                                     users = users,
                                     isCloudConnected = isCloudConnected,
                                     onSelectUser = { user ->
@@ -215,12 +217,14 @@ fun LoginScreen(viewModel: PosViewModel) {
 
 @Composable
 private fun UserSelectionStep(
+    viewModel: PosViewModel,
     users: List<User>,
     isCloudConnected: Boolean,
     onSelectUser: (User) -> Unit,
     onManualLoginClick: () -> Unit,
     onAboutClick: () -> Unit
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -394,6 +398,44 @@ private fun UserSelectionStep(
         }
 
         Spacer(modifier = Modifier.height(18.dp))
+
+        val isGoogleAuthLoading by viewModel.isGoogleAuthLoading.collectAsStateWithLifecycle()
+        val googleAuthEmail by viewModel.googleAuthUserEmail.collectAsStateWithLifecycle()
+        val isGoogleSignedIn by viewModel.isGoogleSignedIn.collectAsStateWithLifecycle()
+
+        Button(
+            onClick = {
+                viewModel.signInWithGoogle(context) { success, msg ->
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            },
+            enabled = !isGoogleAuthLoading,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .testTag("google_sign_in_button"),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF1E293B)
+            )
+        ) {
+            if (isGoogleAuthLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                Spacer(modifier = Modifier.width(10.dp))
+                Text("Conectando con Google...", color = Color.White, fontWeight = FontWeight.Bold)
+            } else {
+                Icon(Icons.Filled.CloudSync, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = if (isGoogleSignedIn) "Google Conectado • ${googleAuthEmail.orEmpty()}" else "Iniciar Sesión con Google (Nube en Vivo)",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedButton(
             onClick = onManualLoginClick,

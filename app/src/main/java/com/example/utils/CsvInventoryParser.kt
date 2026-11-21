@@ -346,6 +346,7 @@ object CsvInventoryParser {
     private fun matchesWholesaleHeader(h: String): Boolean {
         return h in listOf(
             "precio mayor", "precio al mayor", "preciomayor",
+            "precio mayor usd", "preciomayorusd", "precio al mayor usd",
             "mayor", "wholesale", "precio mayorista", "mayorista"
         )
     }

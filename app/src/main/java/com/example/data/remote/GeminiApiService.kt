@@ -50,7 +50,9 @@ data class FunctionParameters(
 data class PropertySchema(
     val type: String,
     val description: String? = null,
-    val items: PropertySchema? = null
+    val items: PropertySchema? = null,
+    val properties: Map<String, PropertySchema>? = null,
+    val required: List<String>? = null
 )
 
 @JsonClass(generateAdapter = true)

@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -20,9 +18,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         HeldSaleItem::class,
         DeliveryNote::class,
         DeliveryNoteItem::class,
-        Expense::class
+        Expense::class,
+        Quote::class,
+        QuoteItem::class
     ],
-    version = 19,
+    version = 23,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,38 +35,11 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun heldSaleDao(): HeldSaleDao
     abstract fun deliveryNoteDao(): DeliveryNoteDao
     abstract fun expenseDao(): ExpenseDao
+    abstract fun quoteDao(): QuoteDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
-
-        val MIGRATION_18_19 = object : Migration(18, 19) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                try {
-                    db.execSQL("ALTER TABLE products ADD COLUMN wholesalePriceUsd REAL NOT NULL DEFAULT 0.0")
-                } catch (_: Throwable) {}
-            }
-        }
-
-        private val allMigrations: Array<Migration> by lazy {
-            val list = mutableListOf<Migration>()
-            for (from in 1..18) {
-                list.add(object : Migration(from, 19) {
-                    override fun migrate(db: SupportSQLiteDatabase) {
-                        try {
-                            db.execSQL("ALTER TABLE products ADD COLUMN allowDecimalQuantity INTEGER NOT NULL DEFAULT 0")
-                        } catch (_: Throwable) {}
-                        try {
-                            db.execSQL("ALTER TABLE products ADD COLUMN isPriceModifiable INTEGER NOT NULL DEFAULT 0")
-                        } catch (_: Throwable) {}
-                        try {
-                            db.execSQL("ALTER TABLE products ADD COLUMN wholesalePriceUsd REAL NOT NULL DEFAULT 0.0")
-                        } catch (_: Throwable) {}
-                    }
-                })
-            }
-            list.toTypedArray()
-        }
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -75,9 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "pos_database"
                 )
-                .addMigrations(*allMigrations)
-                .fallbackToDestructiveMigration(dropAllTables = true)
-                .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 instance
@@ -85,4 +56,3 @@ abstract class AppDatabase : RoomDatabase() {
         }
     }
 }
-

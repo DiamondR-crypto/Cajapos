@@ -3,8 +3,10 @@ package com.example.ui.inventory
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.PosViewModel
+import com.example.utils.InventoryExportUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +55,32 @@ fun InventoryImportExportDialog(
             viewModel.exportProductsToCsv()
         } else {
             viewModel.exportProductsToJson()
+        }
+    }
+
+    val saveCsvLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val saved = InventoryExportUtils.writeExportToUri(context, uri, exportData, "CSV")
+            Toast.makeText(
+                context,
+                if (saved) "Archivo .CSV guardado correctamente" else "No se pudo guardar el archivo .CSV",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    val saveJsonLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val saved = InventoryExportUtils.writeExportToUri(context, uri, exportData, "JSON")
+            Toast.makeText(
+                context,
+                if (saved) "Archivo .JSON guardado correctamente" else "No se pudo guardar el archivo .JSON",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -194,43 +224,85 @@ fun InventoryImportExportDialog(
                             }
                         }
 
-                        // Export Actions
+                        // Export Actions: Guardar archivo real (.csv/.json) o Compartir archivo real
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            OutlinedButton(
+                            Button(
                                 onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("Inventario_${exportFormat}", exportData)
-                                    clipboard.setPrimaryClip(clip)
-                                    Toast.makeText(context, "¡Inventario $exportFormat copiado al portapapeles!", Toast.LENGTH_SHORT).show()
+                                    if (exportData.isBlank()) {
+                                        Toast.makeText(context, "No hay productos para exportar.", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    val suggestedName = InventoryExportUtils.buildInventoryFileName(exportFormat)
+                                    if (exportFormat == "CSV") {
+                                        saveCsvLauncher.launch(suggestedName)
+                                    } else {
+                                        saveJsonLauncher.launch(suggestedName)
+                                    }
                                 },
+                                enabled = products.isNotEmpty(),
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("save_inventory_export_file_button")
                             ) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.SaveAlt, contentDescription = "Guardar archivo", modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Copiar Texto")
+                                Text("Guardar .$exportFormat", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
 
                             Button(
                                 onClick = {
-                                    val sendIntent = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        putExtra(Intent.EXTRA_TEXT, exportData)
-                                        type = if (exportFormat == "CSV") "text/csv" else "application/json"
+                                    if (exportData.isBlank()) {
+                                        Toast.makeText(context, "No hay productos para compartir.", Toast.LENGTH_SHORT).show()
+                                        return@Button
                                     }
-                                    val shareIntent = Intent.createChooser(sendIntent, "Compartir Inventario ($exportFormat)")
-                                    context.startActivity(shareIntent)
+                                    val file = InventoryExportUtils.createExportFile(context, exportData, exportFormat)
+                                    if (file != null) {
+                                        InventoryExportUtils.shareExportFile(
+                                            context = context,
+                                            file = file,
+                                            mimeType = InventoryExportUtils.getMimeTypeForFormat(exportFormat),
+                                            chooserTitle = "Enviar Archivo Inventario (.$exportFormat)"
+                                        )
+                                    } else {
+                                        Toast.makeText(context, "Error al generar el archivo .$exportFormat", Toast.LENGTH_SHORT).show()
+                                    }
                                 },
+                                enabled = products.isNotEmpty(),
                                 shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .heightIn(min = 48.dp)
+                                    .testTag("share_inventory_export_file_button")
                             ) {
-                                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Filled.Share, contentDescription = "Compartir archivo", modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Compartir / Enviar")
+                                Text("Enviar .$exportFormat", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("Inventario_${exportFormat}", exportData)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "¡Inventario $exportFormat copiado al portapapeles!", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = products.isNotEmpty(),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("copy_inventory_export_text_button")
+                        ) {
+                            Icon(Icons.Filled.ContentCopy, contentDescription = "Copiar texto", modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Copiar Texto al Portapapeles")
                         }
                     }
                 } else {

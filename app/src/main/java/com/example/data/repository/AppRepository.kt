@@ -9,6 +9,8 @@ import com.example.data.local.HeldSale
 import com.example.data.local.HeldSaleItem
 import com.example.data.local.PreferencesManager
 import com.example.data.local.Product
+import com.example.data.local.Quote
+import com.example.data.local.QuoteItem
 import com.example.data.local.Sale
 import com.example.data.local.SaleItem
 import com.example.data.local.Supplier
@@ -68,6 +70,8 @@ class AppRepository(
     fun getItemsForSales(saleIds: List<Int>) = database.saleDao().getItemsForSales(saleIds)
     suspend fun getSaleById(saleId: Int): Sale? = database.saleDao().getSaleById(saleId)
     suspend fun updateSale(sale: Sale) = database.saleDao().updateSale(sale)
+    suspend fun insertSale(sale: Sale): Long = database.saleDao().insertSale(sale)
+    suspend fun insertSaleItems(items: List<SaleItem>) = database.saleDao().insertSaleItems(items)
     suspend fun updateCreditPayment(saleId: Int, isPaid: Boolean, paidAmount: Double, notes: String = "") =
         database.saleDao().updateCreditPayment(saleId, isPaid, paidAmount, notes)
     suspend fun updateSaleWithholding(saleId: Int, voucherNumber: String, status: String) =
@@ -177,6 +181,31 @@ class AppRepository(
 
     suspend fun markDeliveryNoteAsInvoiced(noteId: Int) {
         database.deliveryNoteDao().updateStatus(noteId, "FACTURADO")
+    }
+
+    // Quotes (Presupuestos / Cotizaciones)
+    val allQuotes: Flow<List<Quote>> = database.quoteDao().getAllQuotes()
+    fun getItemsForQuote(quoteId: Int) = database.quoteDao().getItemsForQuote(quoteId)
+    suspend fun getItemsForQuoteDirect(quoteId: Int) = database.quoteDao().getItemsForQuoteDirect(quoteId)
+
+    suspend fun getNextQuoteNumber(): String {
+        val count = database.quoteDao().getQuotesCount()
+        return "PRE-${String.format("%05d", count + 1)}"
+    }
+
+    suspend fun createQuote(quote: Quote, items: List<QuoteItem>): Long {
+        val quoteId = database.quoteDao().insertQuote(quote)
+        val itemsWithId = items.map { it.copy(quoteId = quoteId.toInt()) }
+        database.quoteDao().insertQuoteItems(itemsWithId)
+        return quoteId
+    }
+
+    suspend fun updateQuoteStatus(quoteId: Int, status: String) {
+        database.quoteDao().updateStatus(quoteId, status)
+    }
+
+    suspend fun deleteQuote(quoteId: Int) {
+        database.quoteDao().deleteQuote(quoteId)
     }
 
     // Expenses (Gastos Operativos del Negocio)

@@ -54,6 +54,12 @@ object DailyClosurePdfGenerator {
         val totalCardBs = sales.sumOf { it.paymentCardBs }
         val countCardBs = sales.count { it.paymentCardBs > 0.001 }
 
+        val totalCasheaUsd = sales.sumOf { it.paymentCasheaUsd }
+        val countCasheaUsd = sales.count { it.paymentCasheaUsd > 0.001 }
+
+        val totalCreditUsd = sales.sumOf { it.paymentCreditUsd }
+        val countCreditUsd = sales.count { it.paymentCreditUsd > 0.001 }
+
         val rate = if (sales.isNotEmpty() && sales[0].rateBcv > 0.001) sales[0].rateBcv
                    else if (prefs.lastBcvRate > 0.001f) prefs.lastBcvRate.toDouble() else 1.0
 
@@ -234,7 +240,9 @@ object DailyClosurePdfGenerator {
         val payRows = listOf(
             Triple("Efectivo Divisas ($ USD)", countCashUsd, Pair(totalCashUsd, totalCashUsd * rate)),
             Triple("Pago Móvil (Bs.)", countMobileBs, Pair(totalMobileBs / rate, totalMobileBs)),
-            Triple("Punto de Venta / Débito (Bs.)", countCardBs, Pair(totalCardBs / rate, totalCardBs))
+            Triple("Punto de Venta / Débito (Bs.)", countCardBs, Pair(totalCardBs / rate, totalCardBs)),
+            Triple("Cashea ($ USD)", countCasheaUsd, Pair(totalCasheaUsd, totalCasheaUsd * rate)),
+            Triple("Ventas a Crédito ($ USD)", countCreditUsd, Pair(totalCreditUsd, totalCreditUsd * rate))
         )
 
         payRows.forEachIndexed { idx, row ->
@@ -451,11 +459,16 @@ object DailyClosurePdfGenerator {
                 val displayClient = if (clientStr.length > maxCChars) clientStr.take(maxCChars - 3) + "..." else clientStr
                 canvas.drawText(displayClient, leftMargin + 105f, currentY + 11f, paint)
 
+                val methodsUsed = listOfNotNull(
+                    if (sale.paymentCashUsd > 0.001) "Efectivo USD" else null,
+                    if (sale.paymentMobileBs > 0.001) "Pago Móvil" else null,
+                    if (sale.paymentCardBs > 0.001) "Punto Tarjeta" else null,
+                    if (sale.paymentCasheaUsd > 0.001) "Cashea" else null,
+                    if (sale.paymentCreditUsd > 0.001) "Crédito" else null
+                )
                 val payMethod = when {
-                    sale.paymentCashUsd > 0.001 && (sale.paymentMobileBs > 0.001 || sale.paymentCardBs > 0.001) -> "Mixto"
-                    sale.paymentCashUsd > 0.001 -> "Efectivo USD"
-                    sale.paymentMobileBs > 0.001 -> "Pago Móvil"
-                    sale.paymentCardBs > 0.001 -> "Punto Tarjeta"
+                    methodsUsed.size > 1 -> "Mixto"
+                    methodsUsed.size == 1 -> methodsUsed.first()
                     else -> "Efectivo"
                 }
                 canvas.drawText(payMethod, leftMargin + 280f, currentY + 11f, paint)

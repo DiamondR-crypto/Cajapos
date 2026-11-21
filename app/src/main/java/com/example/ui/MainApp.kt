@@ -40,6 +40,7 @@ import com.example.ui.dashboard.DashboardScreen
 import com.example.ui.inventory.InventoryScreen
 import com.example.ui.invoices.InvoicesScreen
 import com.example.ui.pos.PosScreen
+import com.example.ui.quotes.QuotesScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.summary.SummaryScreen
 import com.example.ui.suppliers.SuppliersScreen
@@ -76,6 +77,7 @@ fun MainApp(viewModel: PosViewModel) {
 
     val allItems = listOf(
         Screen.Pos,
+        Screen.Quotes,
         Screen.Dashboard,
         Screen.Inventory,
         Screen.Invoices,
@@ -116,6 +118,7 @@ fun MainApp(viewModel: PosViewModel) {
         Screen.Users.route -> "Usuarios de \"$cleanStoreName\""
         Screen.Settings.route -> "Ajustes de \"$cleanStoreName\""
         Screen.Pos.route -> "SmartPOS286 de \"$cleanStoreName\""
+        Screen.Quotes.route -> "Presupuestos de \"$cleanStoreName\""
         else -> items.find { it.route == currentRoute }?.title ?: "SmartPOS286"
     }
 
@@ -403,6 +406,20 @@ fun MainApp(viewModel: PosViewModel) {
                         .clip(MaterialTheme.shapes.large)
                 ) {
                     composable(Screen.Pos.route) { PosScreen(viewModel) }
+                    composable(Screen.Quotes.route) {
+                        QuotesScreen(
+                            viewModel = viewModel,
+                            onNavigateToPos = {
+                                navController.navigate(Screen.Pos.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        )
+                    }
                     composable(Screen.Dashboard.route) { DashboardScreen(viewModel) }
                     composable(Screen.Inventory.route) { InventoryScreen(viewModel) }
                     composable(Screen.Invoices.route) { InvoicesScreen(viewModel) }
@@ -427,6 +444,15 @@ fun MainApp(viewModel: PosViewModel) {
     if (showAssistantChat) {
         AssistantChatDialog(
             viewModel = viewModel,
+            onNavigateToRoute = { route ->
+                navController.navigate(route) {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
             onDismiss = { showAssistantChat = false }
         )
     }
@@ -520,6 +546,7 @@ fun DraggableAssistantBubble(
 
 sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Pos : Screen("pos", "Facturación", Icons.Filled.Home)
+    object Quotes : Screen("quotes", "Presupuestos", Icons.Filled.RequestQuote)
     object Dashboard : Screen("dashboard", "Dashboard", Icons.Filled.SpaceDashboard)
     object Inventory : Screen("inventory", "Inventario", Icons.Filled.Inventory)
     object Invoices : Screen("invoices", "Facturas", Icons.Filled.Receipt)

@@ -72,11 +72,13 @@ fun SummaryScreen(viewModel: PosViewModel) {
     val totalMobileBs = todaySales.sumOf { it.paymentMobileBs }
     val totalCardBs = todaySales.sumOf { it.paymentCardBs }
     val totalCreditUsd = todaySales.sumOf { it.paymentCreditUsd }
+    val totalCasheaUsd = todaySales.sumOf { it.paymentCasheaUsd }
 
     val countCashUsd = todaySales.count { it.paymentCashUsd > 0.001 }
     val countMobileBs = todaySales.count { it.paymentMobileBs > 0.001 }
     val countCardBs = todaySales.count { it.paymentCardBs > 0.001 }
     val countCreditUsd = todaySales.count { it.paymentCreditUsd > 0.001 }
+    val countCasheaUsd = todaySales.count { it.paymentCasheaUsd > 0.001 }
 
     val totalBaseTaxableUsd = todaySales.sumOf { it.baseTaxableUsd }
     val totalBaseExemptUsd = todaySales.sumOf { it.baseExemptUsd }
@@ -247,6 +249,8 @@ fun SummaryScreen(viewModel: PosViewModel) {
                     countCardBs = countCardBs,
                     totalCreditUsd = totalCreditUsd,
                     countCreditUsd = countCreditUsd,
+                    totalCasheaUsd = totalCasheaUsd,
+                    countCasheaUsd = countCasheaUsd,
                     totalBaseTaxableUsd = totalBaseTaxableUsd,
                     totalBaseExemptUsd = totalBaseExemptUsd,
                     totalDiscountUsd = totalDiscountUsd,
@@ -313,6 +317,8 @@ fun GeneralSummaryTab(
     countCardBs: Int,
     totalCreditUsd: Double,
     countCreditUsd: Int,
+    totalCasheaUsd: Double,
+    countCasheaUsd: Int,
     totalBaseTaxableUsd: Double,
     totalBaseExemptUsd: Double,
     totalDiscountUsd: Double,
@@ -462,13 +468,15 @@ fun GeneralSummaryTab(
                     SummaryCard(title = "Punto / Débito (Bs)", amount = "Bs. ${String.format(Locale.US, "%.2f", totalCardBs)}", subAmount = "$${String.format(Locale.US, "%.2f", totalCardBs / effectiveRate)} USD", count = countCardBs, icon = Icons.Filled.CreditCard)
                 }
                 Box(modifier = Modifier.weight(1f)) {
-                    SummaryCard(title = "Ventas a Crédito ($ USD)", amount = "$${String.format(Locale.US, "%.2f", totalCreditUsd)}", subAmount = "Bs. ${String.format(Locale.US, "%.2f", totalCreditUsd * effectiveRate)}", count = countCreditUsd, icon = Icons.Filled.CreditScore)
+                    SummaryCard(title = "Cashea ($ USD)", amount = "$${String.format(Locale.US, "%.2f", totalCasheaUsd)}", subAmount = "Bs. ${String.format(Locale.US, "%.2f", totalCasheaUsd * effectiveRate)}", count = countCasheaUsd, icon = Icons.Filled.QrCode2)
                 }
             }
+            SummaryCard(title = "Ventas a Crédito ($ USD)", amount = "$${String.format(Locale.US, "%.2f", totalCreditUsd)}", subAmount = "Bs. ${String.format(Locale.US, "%.2f", totalCreditUsd * effectiveRate)}", count = countCreditUsd, icon = Icons.Filled.CreditScore)
         } else {
             SummaryCard(title = "Efectivo Divisas ($ USD)", amount = "$${String.format(Locale.US, "%.2f", totalCashUsd)}", subAmount = "Bs. ${String.format(Locale.US, "%.2f", totalCashUsd * effectiveRate)}", count = countCashUsd, icon = Icons.Filled.AttachMoney)
             SummaryCard(title = "Pago Móvil (Bs)", amount = "Bs. ${String.format(Locale.US, "%.2f", totalMobileBs)}", subAmount = "$${String.format(Locale.US, "%.2f", totalMobileBs / effectiveRate)} USD", count = countMobileBs, icon = Icons.Filled.PhoneAndroid)
             SummaryCard(title = "Punto de Venta / Débito (Bs)", amount = "Bs. ${String.format(Locale.US, "%.2f", totalCardBs)}", subAmount = "$${String.format(Locale.US, "%.2f", totalCardBs / effectiveRate)} USD", count = countCardBs, icon = Icons.Filled.CreditCard)
+            SummaryCard(title = "Cashea ($ USD)", amount = "$${String.format(Locale.US, "%.2f", totalCasheaUsd)}", subAmount = "Bs. ${String.format(Locale.US, "%.2f", totalCasheaUsd * effectiveRate)}", count = countCasheaUsd, icon = Icons.Filled.QrCode2)
             SummaryCard(title = "Ventas a Crédito ($ USD)", amount = "$${String.format(Locale.US, "%.2f", totalCreditUsd)}", subAmount = "Bs. ${String.format(Locale.US, "%.2f", totalCreditUsd * effectiveRate)}", count = countCreditUsd, icon = Icons.Filled.CreditScore)
         }
 

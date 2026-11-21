@@ -88,6 +88,7 @@ object AccountingLedgerCsvExporter {
                 "${esc("Efectivo Recibido (Bs.)")}," +
                 "${esc("Pago Móvil (Bs.)")}," +
                 "${esc("Punto/Tarjeta (Bs.)")}," +
+                "${esc("Cashea (Bs.)")}," +
                 "${esc("Crédito Concedido (Bs.)")}\n"
             )
 
@@ -102,6 +103,7 @@ object AccountingLedgerCsvExporter {
             var sumSalesCashBs = 0.0
             var sumSalesMobileBs = 0.0
             var sumSalesCardBs = 0.0
+            var sumSalesCasheaBs = 0.0
             var sumSalesCreditBs = 0.0
 
             for (sale in sales) {
@@ -118,6 +120,7 @@ object AccountingLedgerCsvExporter {
                 val cashBs = CurrencyMath.convertUsdToBs(sale.paymentCashUsd, r)
                 val mobileBs = CurrencyMath.round2(sale.paymentMobileBs)
                 val cardBs = CurrencyMath.round2(sale.paymentCardBs)
+                val casheaBs = CurrencyMath.convertUsdToBs(sale.paymentCasheaUsd, r)
                 val creditBs = CurrencyMath.convertUsdToBs(sale.paymentCreditUsd, r)
 
                 sumSalesBaseTaxableBs += baseTaxableBs
@@ -131,6 +134,7 @@ object AccountingLedgerCsvExporter {
                 sumSalesCashBs += cashBs
                 sumSalesMobileBs += mobileBs
                 sumSalesCardBs += cardBs
+                sumSalesCasheaBs += casheaBs
                 sumSalesCreditBs += creditBs
 
                 writer.append(
@@ -151,6 +155,7 @@ object AccountingLedgerCsvExporter {
                     "${esc(fmtBsDirect(cashBs))}," +
                     "${esc(fmtBsDirect(mobileBs))}," +
                     "${esc(fmtBsDirect(cardBs))}," +
+                    "${esc(fmtBsDirect(casheaBs))}," +
                     "${esc(fmtBsDirect(creditBs))}\n"
                 )
             }
@@ -170,6 +175,7 @@ object AccountingLedgerCsvExporter {
                 "${esc(fmtBsDirect(sumSalesCashBs))}," +
                 "${esc(fmtBsDirect(sumSalesMobileBs))}," +
                 "${esc(fmtBsDirect(sumSalesCardBs))}," +
+                "${esc(fmtBsDirect(sumSalesCasheaBs))}," +
                 "${esc(fmtBsDirect(sumSalesCreditBs))}\n\n"
             )
 
@@ -314,6 +320,7 @@ object AccountingLedgerCsvExporter {
             writer.append("${esc("Total Recaudado en Efectivo Bs.")},${esc(fmtBsDirect(sumSalesCashBs))}\n")
             writer.append("${esc("Total Recaudado en Pago Móvil Bs.")},${esc(fmtBsDirect(sumSalesMobileBs))}\n")
             writer.append("${esc("Total Recaudado en Punto / Tarjeta Bs.")},${esc(fmtBsDirect(sumSalesCardBs))}\n")
+            writer.append("${esc("Total Recaudado en Cashea Bs.")},${esc(fmtBsDirect(sumSalesCasheaBs))}\n")
             writer.append("${esc("Total Ventas a Crédito Concedidas (Bs.)")},${esc(fmtBsDirect(sumSalesCreditBs))}\n")
             writer.append("${esc("Total Gastos Operativos del Negocio (Bs.)")},${esc(fmtBsDirect(sumExpensesBs))}\n")
             writer.append("${esc("Total Compras Facturadas de Proveedores (Bs.)")},${esc(fmtBsDirect(sumPurchasesTotalBs))}\n")

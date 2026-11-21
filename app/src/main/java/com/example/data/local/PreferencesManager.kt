@@ -55,7 +55,7 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putString("backupMode", value).apply()
 
     var googleAccount: String
-        get() = prefs.getString("googleAccount", "leornardcano@gmail.com") ?: "leornardcano@gmail.com"
+        get() = prefs.getString("googleAccount", "") ?: ""
         set(value) = prefs.edit().putString("googleAccount", value).apply()
 
     // --- COMPANY PROFILE (REGISTRO ÚNICO) ---
@@ -220,4 +220,13 @@ class PreferencesManager(context: Context) {
     var isCloudConnected: Boolean
         get() = prefs.getBoolean("isCloudConnected", false)
         set(value) = prefs.edit().putBoolean("isCloudConnected", value).apply()
+
+    // --- AUTOMATIC MINIMUM PROFIT MARGIN (OPTIONAL) ---
+    var isMinProfitMarginEnabled: Boolean
+        get() = prefs.getBoolean("isMinProfitMarginEnabled", false)
+        set(value) = prefs.edit().putBoolean("isMinProfitMarginEnabled", value).apply()
+
+    var minProfitMarginPercent: Float
+        get() = prefs.getFloat("minProfitMarginPercent", 30.0f)
+        set(value) = prefs.edit().putFloat("minProfitMarginPercent", value).apply()
 }

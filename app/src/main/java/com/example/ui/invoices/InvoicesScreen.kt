@@ -23,10 +23,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.DeliveryNote
 import com.example.data.local.HeldSale
+import com.example.data.local.Quote
 import com.example.data.local.Sale
 import com.example.ui.PosViewModel
 import com.example.ui.components.DebtsAndRemindersDialog
 import com.example.ui.components.DeliveryNoteDialog
+import com.example.ui.components.QuoteTicketDialog
 import com.example.ui.components.TicketDialog
 import com.example.ui.pos.HeldSaleItemCard
 import java.text.SimpleDateFormat
@@ -37,12 +39,14 @@ fun InvoicesScreen(viewModel: PosViewModel) {
     val sales by viewModel.allSales.collectAsStateWithLifecycle()
     val deliveryNotes by viewModel.allDeliveryNotes.collectAsStateWithLifecycle()
     val heldSales by viewModel.allHeldSales.collectAsStateWithLifecycle()
+    val quotes by viewModel.allQuotes.collectAsStateWithLifecycle()
     val creditSales by viewModel.allCreditSales.collectAsStateWithLifecycle()
     val purchaseInvoices by viewModel.allPurchaseInvoices.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableStateOf(0) } // 0: Facturas, 1: Notas de Entrega, 2: Facturas en Espera, 3: Créditos
+    var selectedTab by remember { mutableStateOf(0) } // 0: Facturas, 1: Notas de Entrega, 2: Facturas en Espera, 3: Presupuestos
     var selectedSale by remember { mutableStateOf<Sale?>(null) }
     var selectedDeliveryNote by remember { mutableStateOf<DeliveryNote?>(null) }
+    var selectedQuote by remember { mutableStateOf<Quote?>(null) }
     var noteToCancel by remember { mutableStateOf<DeliveryNote?>(null) }
     var showDebtsDialog by remember { mutableStateOf(false) }
     var debtsInitialTab by remember { mutableStateOf(0) }
@@ -182,6 +186,16 @@ fun InvoicesScreen(viewModel: PosViewModel) {
                     )
                     Tab(
                         selected = selectedTab == 3,
+                        onClick = { selectedTab = 3 },
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Filled.RequestQuote, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("Presupuestos (${quotes.size})", fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Normal, fontSize = 12.sp)
+                            }
+                        }
+                    )
+                    Tab(
+                        selected = false,
                         onClick = {
                             debtsInitialTab = 0
                             showDebtsDialog = true
@@ -217,8 +231,15 @@ fun InvoicesScreen(viewModel: PosViewModel) {
                             items(sales) { sale ->
                                 val paidBs = sale.paymentMobileBs + sale.paymentCardBs
                                 val paidUsd = sale.paymentCashUsd
-                                val isPaidInBs = (paidUsd <= 0.001)
-                                val isPaidInUsd = (paidBs <= 0.001 && paidUsd > 0.001)
+                                val paidCashea = sale.paymentCasheaUsd
+                                val hasBs = paidBs > 0.001
+                                val hasCashUsd = paidUsd > 0.001
+                                val hasCashea = paidCashea > 0.001
+                                val hasCredit = sale.paymentCreditUsd > 0.001
+                                val methodsCount = listOf(hasBs, hasCashUsd, hasCashea, hasCredit).count { it }
+                                val isPaidCasheaOnly = hasCashea && methodsCount == 1
+                                val isPaidInBs = (hasBs && methodsCount == 1) || methodsCount == 0
+                                val isPaidInUsd = hasCashUsd && methodsCount == 1
                                 val rate = if (sale.rateBcv > 0.001) sale.rateBcv else 1.0
 
                                 Card(
@@ -242,6 +263,7 @@ fun InvoicesScreen(viewModel: PosViewModel) {
                                                     Surface(
                                                         shape = RoundedCornerShape(4.dp),
                                                         color = when {
+                                                            isPaidCasheaOnly -> Color(0xFFFACC15).copy(alpha = 0.28f)
                                                             isPaidInBs -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                                                             isPaidInUsd -> Color(0xFF10B981).copy(alpha = 0.15f)
                                                             else -> Color(0xFFF59E0B).copy(alpha = 0.15f)
@@ -249,6 +271,7 @@ fun InvoicesScreen(viewModel: PosViewModel) {
                                                     ) {
                                                         Text(
                                                             text = when {
+                                                                isPaidCasheaOnly -> "Cashea"
                                                                 isPaidInBs -> "Bolívares"
                                                                 isPaidInUsd -> if (sale.igtfUsd > 0.001) "USD + IGTF" else "USD Divisas"
                                                                 else -> "Mixto"
@@ -256,6 +279,7 @@ fun InvoicesScreen(viewModel: PosViewModel) {
                                                             fontSize = 10.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             color = when {
+                                                                isPaidCasheaOnly -> Color(0xFF854D0E)
                                                                 isPaidInBs -> MaterialTheme.colorScheme.onPrimaryContainer
                                                                 isPaidInUsd -> Color(0xFF047857)
                                                                 else -> Color(0xFFB45309)
@@ -538,6 +562,110 @@ fun InvoicesScreen(viewModel: PosViewModel) {
                         }
                     }
                 }
+
+                3 -> {
+                    // TAB: PRESUPUESTOS
+                    if (quotes.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Filled.RequestQuote, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
+                                Spacer(Modifier.height(8.dp))
+                                Text("No hay presupuestos guardados.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Crea presupuestos desde el módulo Presupuestos en el menú principal.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                            }
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 340.dp),
+                            contentPadding = PaddingValues(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(quotes, key = { it.id }) { quote ->
+                                val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                                val dateOnlySdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { selectedQuote = quote },
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Text(quote.quoteNumber, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, color = Color(0xFF4F46E5))
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = when (quote.status) {
+                                                        "ACEPTADO" -> Color(0xFF059669).copy(alpha = 0.15f)
+                                                        "FACTURADO" -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                                        "ANULADO" -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                                                        else -> Color(0xFF0284C7).copy(alpha = 0.15f)
+                                                    }
+                                                ) {
+                                                    Text(
+                                                        text = quote.status,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = when (quote.status) {
+                                                            "ACEPTADO" -> Color(0xFF059669)
+                                                            "FACTURADO" -> MaterialTheme.colorScheme.primary
+                                                            "ANULADO" -> MaterialTheme.colorScheme.error
+                                                            else -> Color(0xFF0284C7)
+                                                        },
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(
+                                                    "\$${String.format("%.2f", quote.totalUsd)} USD",
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    "Bs. ${String.format("%.2f", quote.totalBs)}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+
+                                        Text("${quote.customerName} (${quote.customerDocument})", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                        Text(
+                                            "Emitido: ${sdf.format(Date(quote.timestamp))} • Válido hasta: ${dateOnlySdf.format(Date(quote.validUntil))}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            TextButton(
+                                                onClick = { selectedQuote = quote },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("Ticket / WhatsApp", fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -559,6 +687,16 @@ fun InvoicesScreen(viewModel: PosViewModel) {
             items = items,
             viewModel = viewModel,
             onDismiss = { selectedDeliveryNote = null }
+        )
+    }
+
+    selectedQuote?.let { quote ->
+        val items by viewModel.getItemsForQuote(quote.id).collectAsStateWithLifecycle(initialValue = emptyList())
+        QuoteTicketDialog(
+            quote = quote,
+            items = items,
+            viewModel = viewModel,
+            onDismiss = { selectedQuote = null }
         )
     }
 

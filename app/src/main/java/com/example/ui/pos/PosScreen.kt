@@ -12,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlin.math.abs
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import com.example.data.local.Customer
@@ -63,6 +66,7 @@ fun PosScreen(viewModel: PosViewModel) {
     val sales by viewModel.allSales.collectAsStateWithLifecycle()
     val heldSales by viewModel.allHeldSales.collectAsStateWithLifecycle()
     val voiceStatus by viewModel.voiceStatus.collectAsStateWithLifecycle()
+    val posPrefillCustomer by viewModel.posPrefillCustomer.collectAsStateWithLifecycle()
 
     val isLicensed by viewModel.isLicensed.collectAsStateWithLifecycle()
     val isUnlimitedInvoices by viewModel.isUnlimitedDailyInvoices.collectAsStateWithLifecycle()
@@ -87,10 +91,39 @@ fun PosScreen(viewModel: PosViewModel) {
     var searchQuery by remember { mutableStateOf("") }
     var isDropdownExpanded by remember { mutableStateOf(false) }
     var editingCartItem by remember { mutableStateOf<CartItem?>(null) }
+    var selectedCategory by remember { mutableStateOf("Todas") }
 
-    val filteredProducts = products.filter {
-        it.name.contains(searchQuery, ignoreCase = true) ||
-        it.code.contains(searchQuery, ignoreCase = true)
+    val availableCategories = remember(products) {
+        val cats = products
+            .map { it.category.trim().ifBlank { "General" } }
+            .distinct()
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+        listOf("Todas") + cats
+    }
+
+    LaunchedEffect(availableCategories) {
+        if (selectedCategory !in availableCategories) {
+            selectedCategory = "Todas"
+        }
+    }
+
+    LaunchedEffect(posPrefillCustomer) {
+        posPrefillCustomer?.let { (name, doc) ->
+            customerName = name
+            customerDoc = doc
+            viewModel.consumePosPrefillCustomer()
+        }
+    }
+
+    val filteredProducts = remember(products, searchQuery, selectedCategory) {
+        products.filter { product ->
+            val productCategory = product.category.trim().ifBlank { "General" }
+            val matchesCategory = selectedCategory == "Todas" || productCategory.equals(selectedCategory, ignoreCase = true)
+            val matchesSearch = searchQuery.isBlank() ||
+                product.name.contains(searchQuery, ignoreCase = true) ||
+                product.code.contains(searchQuery, ignoreCase = true)
+            matchesCategory && matchesSearch
+        }
     }
 
     val filteredCustomers = customers.filter {
@@ -186,6 +219,16 @@ fun PosScreen(viewModel: PosViewModel) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
+                                .testTag("pos_search_input")
+                        )
+
+                        CategoryFilterChipsRow(
+                            categories = availableCategories,
+                            selectedCategory = selectedCategory,
+                            onCategorySelected = { selectedCategory = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp)
                         )
 
                         Row(
@@ -504,8 +547,9 @@ fun PosScreen(viewModel: PosViewModel) {
                     modifier = Modifier
                         .menuAnchor(MenuAnchorType.PrimaryEditable)
                         .fillMaxWidth()
+                        .testTag("pos_portrait_search_input")
                 )
-                if (searchQuery.isNotEmpty() && filteredProducts.isNotEmpty()) {
+                if ((searchQuery.isNotEmpty() || selectedCategory != "Todas") && filteredProducts.isNotEmpty()) {
                     ExposedDropdownMenu(
                         expanded = isDropdownExpanded,
                         onDismissRequest = { isDropdownExpanded = false }
@@ -549,6 +593,68 @@ fun PosScreen(viewModel: PosViewModel) {
                                     isDropdownExpanded = false
                                 }
                             )
+                        }
+                    }
+                }
+            }
+
+            // Category Filter Chips (Portrait)
+            CategoryFilterChipsRow(
+                categories = availableCategories,
+                selectedCategory = selectedCategory,
+                onCategorySelected = { selectedCategory = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
+            )
+
+            // Quick filtered product strip when a category is selected in Portrait
+            if (selectedCategory != "Todas") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Categoría: $selectedCategory (${filteredProducts.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        TextButton(
+                            onClick = { selectedCategory = "Todas" },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                            modifier = Modifier.defaultMinSize(minHeight = 36.dp)
+                        ) {
+                            Text("Ver todas", fontSize = 12.sp)
+                        }
+                    }
+                    if (filteredProducts.isEmpty()) {
+                        Text(
+                            "No hay productos en esta categoría.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(vertical = 2.dp)
+                        ) {
+                            items(filteredProducts) { product ->
+                                Box(modifier = Modifier.width(156.dp)) {
+                                    ProductQuickGridItem(
+                                        product = product,
+                                        bcvRate = bcvRate,
+                                        onAddToCart = { viewModel.addToCart(product) }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1171,6 +1277,7 @@ fun CheckoutDialog(
     var cashUsdInput by remember { mutableStateOf("") }
     var mobileBsInput by remember { mutableStateOf("") }
     var cardBsInput by remember { mutableStateOf("") }
+    var casheaUsdInput by remember { mutableStateOf("") }
     var creditUsdInput by remember { mutableStateOf("") }
     var creditDueDateDays by remember { mutableStateOf(15) }
     var creditNotesInput by remember { mutableStateOf("") }
@@ -1218,6 +1325,7 @@ fun CheckoutDialog(
     val paidCashUsd = parseUserAmount(cashUsdInput)
     val paidMobileBs = parseUserAmount(mobileBsInput)
     val paidCardBs = parseUserAmount(cardBsInput)
+    val paidCasheaUsd = parseUserAmount(casheaUsdInput)
     val paidCreditUsd = parseUserAmount(creditUsdInput)
 
     // Converted to USD
@@ -1231,7 +1339,7 @@ fun CheckoutDialog(
     val totalDueUsd = productsTotalUsd + igtfUsd
     val totalDueBs = (productsTotalUsd * effectiveRate) + igtfBs
 
-    val totalPaidUsd = paidCashUsd + paidMobileUsd + paidCardUsd + paidCreditUsd
+    val totalPaidUsd = paidCashUsd + paidMobileUsd + paidCardUsd + paidCasheaUsd + paidCreditUsd
 
     // Difference
     val remainingUsd = totalDueUsd - totalPaidUsd
@@ -1498,7 +1606,7 @@ fun CheckoutDialog(
                         if (remainingUsd > 0.009) {
                             TextButton(
                                 onClick = {
-                                    val unpaidProductUsd = (productsTotalUsd - (paidMobileUsd + paidCardUsd)).coerceAtLeast(0.0)
+                                    val unpaidProductUsd = (productsTotalUsd - (paidMobileUsd + paidCardUsd + paidCasheaUsd + paidCreditUsd)).coerceAtLeast(0.0)
                                     val neededCashUsd = unpaidProductUsd * 1.03
                                     cashUsdInput = String.format("%.2f", neededCashUsd).replace(",", ".")
                                 },
@@ -1562,6 +1670,68 @@ fun CheckoutDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                // 3.5. Cashea ($ USD) with live subtraction and Bs equivalent
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFFFACC15)
+                            ) {
+                                Text(
+                                    "Cashea",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color(0xFF111827),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Text("Cashea (\$ USD)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        }
+                        if (remainingUsd > 0.009) {
+                            TextButton(
+                                onClick = {
+                                    val neededCashea = remainingUsd.coerceAtLeast(0.0)
+                                    casheaUsdInput = String.format(java.util.Locale.US, "%.2f", neededCashea)
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("checkout_cashea_fill_button")
+                            ) {
+                                Text("Pagar Restante con Cashea", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = casheaUsdInput,
+                        onValueChange = { casheaUsdInput = it },
+                        placeholder = { Text("0.00") },
+                        prefix = { Text("\$ ", fontWeight = FontWeight.Bold, color = Color(0xFFCA8A04)) },
+                        trailingIcon = {
+                            if (paidCasheaUsd > 0) {
+                                Text(
+                                    "≈ Bs. ${String.format("%.2f", paidCasheaUsd * effectiveRate)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFFCA8A04),
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(end = 10.dp)
+                                )
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("checkout_cashea_input")
                     )
                 }
 
@@ -1784,12 +1954,13 @@ fun CheckoutDialog(
                                 paymentMobileBs = paidMobileBs,
                                 paymentCardBs = paidCardBs,
                                 paymentCreditUsd = paidCreditUsd,
+                                paymentCasheaUsd = paidCasheaUsd,
                                 creditDueDate = creditDueTimestamp,
                                 creditNotes = creditNotesInput.trim(),
                                 discountUsd = effectiveDiscountUsd,
                                 onSuccess = { sale ->
                                     val items = cart.map {
-                                        SaleItem(0, sale.id, it.product.id, it.product.name, it.quantity, it.product.priceUsd, it.product.isTaxExempt)
+                                        SaleItem(0, sale.id, it.product.id, it.product.name, it.quantity, it.effectivePrice, it.product.isTaxExempt)
                                     }
                                     onSaleComplete(sale, items)
                                 }
@@ -1822,6 +1993,12 @@ fun EditCartItemDialog(
 ) {
     var quantityStr by remember { mutableStateOf(if (item.product.allowDecimalQuantity) item.quantity.toString() else item.quantity.toInt().toString()) }
     var priceStr by remember { mutableStateOf(item.effectivePrice.toString()) }
+    var selectedWholesale by remember {
+        mutableStateOf(
+            item.product.wholesalePriceUsd > 0.0 &&
+                abs(item.effectivePrice - item.product.wholesalePriceUsd) < 0.001
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1842,11 +2019,65 @@ fun EditCartItemDialog(
                         }
                     }
                 )
+
+                if (item.product.wholesalePriceUsd > 0.0) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "Tarifa Aplicada",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = !selectedWholesale,
+                                onClick = {
+                                    selectedWholesale = false
+                                    priceStr = String.format("%.2f", item.product.priceUsd).replace(",", ".")
+                                },
+                                label = {
+                                    Text(
+                                        "Normal (\$${String.format("%.2f", item.product.priceUsd)})",
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("pos_normal_price_chip")
+                            )
+                            FilterChip(
+                                selected = selectedWholesale,
+                                onClick = {
+                                    selectedWholesale = true
+                                    priceStr = String.format("%.2f", item.product.wholesalePriceUsd).replace(",", ".")
+                                },
+                                label = {
+                                    Text(
+                                        "Mayor (\$${String.format("%.2f", item.product.wholesalePriceUsd)})",
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("pos_wholesale_price_chip")
+                            )
+                        }
+                    }
+                }
                 
                 if (item.product.isPriceModifiable) {
                     OutlinedTextField(
                         value = priceStr,
-                        onValueChange = { priceStr = it },
+                        onValueChange = {
+                            priceStr = it
+                            val parsed = it.replace(",", ".").toDoubleOrNull()
+                            selectedWholesale = parsed != null &&
+                                item.product.wholesalePriceUsd > 0.0 &&
+                                abs(parsed - item.product.wholesalePriceUsd) < 0.001
+                        },
                         label = { Text("Precio Unitario ($)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
@@ -1857,8 +2088,12 @@ fun EditCartItemDialog(
         },
         confirmButton = {
             Button(onClick = {
-                val q = quantityStr.toDoubleOrNull() ?: item.quantity
-                val p = if (item.product.isPriceModifiable) priceStr.toDoubleOrNull() else null
+                val q = quantityStr.replace(",", ".").toDoubleOrNull() ?: item.quantity
+                val p = when {
+                    item.product.isPriceModifiable -> priceStr.replace(",", ".").toDoubleOrNull()
+                    item.product.wholesalePriceUsd > 0.0 -> if (selectedWholesale) item.product.wholesalePriceUsd else null
+                    else -> null
+                }
                 
                 val finalQ = if (item.product.allowDecimalQuantity) q else q.toInt().toDouble()
                 onConfirm(finalQ, p)
@@ -1880,6 +2115,49 @@ fun EditCartItemDialog(
             }
         }
     )
+}
+
+@Composable
+fun CategoryFilterChipsRow(
+    categories: List<String>,
+    selectedCategory: String,
+    onCategorySelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        modifier = modifier.testTag("pos_category_filter_row"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+    ) {
+        items(categories) { category ->
+            val isSelected = selectedCategory == category
+            val tagSlug = category.lowercase(java.util.Locale.ROOT).replace(" ", "_")
+            FilterChip(
+                selected = isSelected,
+                onClick = { onCategorySelected(category) },
+                label = {
+                    Text(
+                        text = category,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1
+                    )
+                },
+                leadingIcon = if (isSelected) {
+                    {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else null,
+                modifier = Modifier
+                    .defaultMinSize(minHeight = 48.dp)
+                    .testTag("pos_category_filter_chip_$tagSlug")
+            )
+        }
+    }
 }
 
 @Composable
@@ -2185,6 +2463,14 @@ fun ProductQuickGridItem(
                         fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (product.wholesalePriceUsd > 0.0) {
+                        Text(
+                            text = "Mayor: \$${String.format("%.2f", product.wholesalePriceUsd)}",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF2563EB)
+                        )
+                    }
                 }
                 Surface(
                     shape = CircleShape,
@@ -2241,6 +2527,21 @@ fun CartItemRow(
                                 "Exento",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF047857),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                    if (item.product.wholesalePriceUsd > 0.0 && abs(item.effectivePrice - item.product.wholesalePriceUsd) < 0.001) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFF2563EB).copy(alpha = 0.14f)
+                        ) {
+                            Text(
+                                "Al Mayor",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF1D4ED8),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)

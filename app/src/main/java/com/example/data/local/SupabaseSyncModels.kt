@@ -62,6 +62,7 @@ data class SupabaseTicketRecord(
     @SerialName("payment_mobile_bs") val paymentMobileBs: Double = 0.0,
     @SerialName("payment_card_bs") val paymentCardBs: Double = 0.0,
     @SerialName("payment_credit_usd") val paymentCreditUsd: Double = 0.0,
+    @SerialName("payment_cashea_usd") val paymentCasheaUsd: Double = 0.0,
     @SerialName("cashier_name") val cashierName: String = "",
     @SerialName("cash_register_number") val cashRegisterNumber: String = "",
     @SerialName("igtf_usd") val igtfUsd: Double = 0.0,

@@ -17,6 +17,15 @@ data class DisambiguationItem(
     val stock: Double = 0.0
 )
 
+data class QuoteDraftItem(
+    val productId: Int,
+    val productName: String,
+    val quantity: Double,
+    val priceUsd: Double,
+    val isTaxExempt: Boolean = false,
+    val isWholesale: Boolean = false
+)
+
 sealed class PendingAssistantAction {
     data class CreateProductAction(
         val name: String,
@@ -25,7 +34,26 @@ sealed class PendingAssistantAction {
         val costPriceUsd: Double,
         val priceUsd: Double,
         val isRecipe: Boolean,
-        val isTaxExempt: Boolean = false
+        val isTaxExempt: Boolean = false,
+        val code: String = "",
+        val profitPercentage: Double = 0.0,
+        val wholesalePriceUsd: Double = 0.0,
+        val autoCalculatedWithMinMargin: Boolean = false
+    ) : PendingAssistantAction()
+
+    data class CreateQuoteAction(
+        val customerName: String = "Consumidor Final",
+        val customerDocument: String = "V-00000000",
+        val customerPhone: String = "",
+        val items: List<QuoteDraftItem> = emptyList(),
+        val validityDays: Int = 7,
+        val discountUsd: Double = 0.0,
+        val notesOrConditions: String = "Precios sujetos a disponibilidad y tasa BCV vigente.",
+        val baseTaxableUsd: Double = 0.0,
+        val baseExemptUsd: Double = 0.0,
+        val ivaUsd: Double = 0.0,
+        val totalUsd: Double = 0.0,
+        val totalBs: Double = 0.0
     ) : PendingAssistantAction()
 
     data class AddStockAction(
@@ -51,6 +79,16 @@ sealed class PendingAssistantAction {
         val address: String
     ) : PendingAssistantAction()
 
+    data class RegisterExpenseAction(
+        val description: String,
+        val amountUsd: Double,
+        val category: String = "Operativo"
+    ) : PendingAssistantAction()
+
+    data class UpdateBcvRateAction(
+        val newRateBs: Double
+    ) : PendingAssistantAction()
+
     data class DeleteProductAction(
         val productId: Int,
         val productName: String
@@ -70,5 +108,6 @@ data class AssistantChatMessage(
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
     val pendingAction: PendingAssistantAction? = null,
-    val isConfirmedOrResolved: Boolean = false
+    val isConfirmedOrResolved: Boolean = false,
+    val createdQuoteId: Int? = null
 )
