@@ -347,7 +347,7 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
     fun hasValidApiKey(): Boolean = getEffectiveApiKeyOrNull() != null
 
     fun getEffectiveModel(): String {
-        return "gemini-2.5-flash"
+        return "gemini-3.5-flash-lite"
     }
 
     fun getLiveModel(): String = "models/gemini-2.5-flash-native-audio-preview-12-2025"
