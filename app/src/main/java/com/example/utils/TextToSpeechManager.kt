@@ -1,6 +1,9 @@
 package com.example.utils
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 
@@ -12,6 +15,12 @@ class TextToSpeechManager(context: Context) {
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("es", "ES")
+                tts?.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
                 isInitialized = true
             }
         }
@@ -28,11 +37,15 @@ class TextToSpeechManager(context: Context) {
                 .replace("~", "")
                 .replace(">", "")
                 // Remove most emojis/special symbols but keep basic punctuation
-                .replace(Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+"), "") 
+                .replace(Regex("[\\uD83C-\\uDBFF\\uDC00-\\uDFFF]+"), "")
                 .replace(Regex("\\[(.*?)\\]\\(.*?\\)"), "$1") // Keep link text, remove URL
                 .trim()
-            
-            tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, null)
+
+            val params = Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+            }
+            tts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, params, "pos_tts_utterance")
         }
     }
 

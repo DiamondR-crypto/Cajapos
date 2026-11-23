@@ -241,6 +241,8 @@ object TicketUtils {
 
     /**
      * Genera el bitmap de la Nota de Entrega adaptado dinámicamente al ancho térmico (58mm o 80mm).
+     * Cumple con SENIAT: "NOTA DE ENTREGA • NO VÁLIDO PARA CRÉDITO FISCAL", sin desglose de IVA,
+     * reflejando los montos en USD o Bolívares según note.displayCurrency.
      */
     fun generateDeliveryNoteBitmap(
         context: Context,
@@ -252,7 +254,9 @@ object TicketUtils {
         val is80mm = customWidthPx == 576 || (customWidthPx == null && prefs.printerPaperWidth.contains("80"))
         val width = if (is80mm) 576 else 384
         val baseLineHeight = if (is80mm) 28 else 22
-        val height = (if (is80mm) 920 else 780) + (items.size * baseLineHeight)
+        val height = (if (is80mm) 960 else 820) + (items.size * baseLineHeight)
+        val useBs = note.displayCurrency.equals("BS", ignoreCase = true)
+        val rate = if (note.rateBcv > 0.001) note.rateBcv else 1.0
 
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -291,16 +295,17 @@ object TicketUtils {
         }
         y += if (is80mm) 10f else 6f
 
-        // Document Banner
-        paint.color = Color.DKGRAY
+        // Document Banner (SENIAT compliant)
+        paint.color = Color.BLACK
         paint.textSize = if (is80mm) 18f else 14f
         paint.isFakeBoldText = true
-        canvas.drawText("--- NOTA DE ENTREGA ---", xCenter, y, paint)
+        canvas.drawText("NOTA DE ENTREGA", xCenter, y, paint)
         y += if (is80mm) 22f else 18f
+        paint.color = Color.DKGRAY
         paint.textSize = if (is80mm) 14f else 11f
-        paint.isFakeBoldText = false
-        canvas.drawText("(DOCUMENTO NO FISCAL - CONTROL INTERNO / DESPACHO)", xCenter, y, paint)
+        canvas.drawText("NO VÁLIDO PARA CRÉDITO FISCAL", xCenter, y, paint)
         paint.color = Color.BLACK
+        paint.isFakeBoldText = false
         y += if (is80mm) 28f else 22f
 
         paint.textAlign = Paint.Align.LEFT
@@ -309,13 +314,13 @@ object TicketUtils {
         y += if (is80mm) 22f else 18f
 
         paint.isFakeBoldText = true
-        canvas.drawText("N° Control: ${note.noteNumber}", xLeft, y, paint)
+        canvas.drawText("N° Nota: ${note.noteNumber.ifBlank { "NE-${note.id}" }}", xLeft, y, paint)
         paint.isFakeBoldText = false
         y += if (is80mm) 22f else 18f
 
         val noteCashier = note.cashierName.ifBlank { "Cajero" }
         val noteRegister = note.cashRegisterNumber.ifBlank { prefs.cashRegisterNumber.ifBlank { "01" } }
-        canvas.drawText("Caja: $noteRegister  •  Despachado por: $noteCashier", xLeft, y, paint)
+        canvas.drawText("Caja: $noteRegister  •  Emite: $noteCashier", xLeft, y, paint)
         y += if (is80mm) 22f else 18f
 
         canvas.drawText("Cliente: ${note.customerName.ifBlank { "Cliente General" }}", xLeft, y, paint)
@@ -329,7 +334,7 @@ object TicketUtils {
             y += if (is80mm) 22f else 18f
         }
         if (note.reasonOrObservation.isNotBlank()) {
-            canvas.drawText("Motivo: ${note.reasonOrObservation}", xLeft, y, paint)
+            canvas.drawText("Obs.: ${note.reasonOrObservation}", xLeft, y, paint)
             y += if (is80mm) 22f else 18f
         }
         y += if (is80mm) 10f else 6f
@@ -339,37 +344,53 @@ object TicketUtils {
         paint.textSize = if (is80mm) 16f else 13f
         canvas.drawText("Cant. / Descripción", xLeft, y, paint)
         paint.textAlign = Paint.Align.RIGHT
-        canvas.drawText("Ref. Total", xRight, y, paint)
+        canvas.drawText(if (useBs) "Total Bs." else "Total USD", xRight, y, paint)
         paint.textAlign = Paint.Align.LEFT
         y += if (is80mm) 10f else 8f
         paint.isFakeBoldText = false
         canvas.drawLine(xLeft, y, xRight, y, paint)
         y += if (is80mm) 24f else 19f
 
-        // Items
+        // Items (no IVA breakdown)
         for (item in items) {
-            val line = "${item.quantity}x ${item.productName}"
-            canvas.drawText(line, xLeft, y, paint)
+            val qtyLabel = if (item.quantity % 1.0 == 0.0) item.quantity.toInt().toString() else String.format(Locale.US, "%.2f", item.quantity)
+            val lineTotalUsd = item.priceUsd * item.quantity
+            val unitDisplay = if (useBs) "Bs. ${String.format(Locale.US, "%.2f", item.priceUsd * rate)}" else "\$${String.format(Locale.US, "%.2f", item.priceUsd)}"
+            val line = "${qtyLabel}x ${item.productName} ($unitDisplay)"
+            canvas.drawText(line.take(if (is80mm) 36 else 26), xLeft, y, paint)
             paint.textAlign = Paint.Align.RIGHT
-            val itemTotalUsd = item.priceUsd * item.quantity
-            canvas.drawText("\$${String.format("%.2f", itemTotalUsd)}", xRight, y, paint)
+            val lineTotalStr = if (useBs) {
+                "Bs.${String.format(Locale.US, "%.2f", lineTotalUsd * rate)}"
+            } else {
+                "\$${String.format(Locale.US, "%.2f", lineTotalUsd)}"
+            }
+            canvas.drawText(lineTotalStr, xRight, y, paint)
             paint.textAlign = Paint.Align.LEFT
             y += if (is80mm) 24f else 19f
         }
 
         y += if (is80mm) 8f else 6f
         canvas.drawLine(xLeft, y, xRight, y, paint)
-        y += if (is80mm) 24f else 19f
+        y += if (is80mm) 26f else 20f
 
-        // Totals
+        // Totals in selected currency ONLY (no IVA)
+        val totalBs = if (note.totalEstimatedBs > 0.001) note.totalEstimatedBs else note.totalEstimatedUsd * rate
         paint.textAlign = Paint.Align.RIGHT
         paint.isFakeBoldText = true
-        paint.textSize = if (is80mm) 18f else 14f
-        canvas.drawText("Valor Ref. Total: \$${String.format("%.2f", note.totalEstimatedUsd)} USD", xRight, y, paint)
-        y += if (is80mm) 24f else 19f
-        paint.textSize = if (is80mm) 15f else 12f
-        paint.isFakeBoldText = false
-        canvas.drawText("Valor Ref. en Bs: Bs. ${String.format("%.2f", note.totalEstimatedBs)} (Tasa: ${String.format("%.2f", note.rateBcv)})", xRight, y, paint)
+        paint.textSize = if (is80mm) 20f else 15f
+        if (useBs) {
+            canvas.drawText("TOTAL NOTA: Bs. ${String.format(Locale.US, "%.2f", totalBs)}", xRight, y, paint)
+            y += if (is80mm) 22f else 18f
+            paint.textSize = if (is80mm) 14f else 11f
+            paint.isFakeBoldText = false
+            canvas.drawText("Tasa BCV ref.: Bs. ${String.format(Locale.US, "%.2f", rate)}", xRight, y, paint)
+        } else {
+            canvas.drawText("TOTAL NOTA: \$${String.format(Locale.US, "%.2f", note.totalEstimatedUsd)} USD", xRight, y, paint)
+            y += if (is80mm) 22f else 18f
+            paint.textSize = if (is80mm) 14f else 11f
+            paint.isFakeBoldText = false
+            canvas.drawText("Moneda: Dólares (USD)", xRight, y, paint)
+        }
         y += if (is80mm) 38f else 30f
 
         // Signatures area
@@ -388,9 +409,293 @@ object TicketUtils {
         y += if (is80mm) 28f else 22f
 
         paint.textSize = if (is80mm) 13f else 10f
-        canvas.drawText("La firma confirma la recepción a satisfacción de la mercancía.", xCenter, y, paint)
+        canvas.drawText("Nota de entrega • No válido para crédito fiscal.", xCenter, y, paint)
 
         return Bitmap.createBitmap(bitmap, 0, 0, width, (y + 35).toInt())
+    }
+
+    /**
+     * Genera un comprobante estructurado de Nota de Entrega para enviar por WhatsApp:
+     * - Encabezado destacado SENIAT: "NOTA DE ENTREGA • NO VÁLIDO PARA CRÉDITO FISCAL"
+     * - Sin desglose de IVA, únicamente precio de venta unitario y total
+     * - Refleja los montos en Dólares ($ USD) o Bolívares (Bs.) según note.displayCurrency
+     */
+    fun generateWhatsAppDeliveryNoteBitmap(
+        context: Context,
+        prefs: PreferencesManager,
+        note: DeliveryNote,
+        items: List<DeliveryNoteItem>
+    ): Bitmap {
+        val useBs = note.displayCurrency.equals("BS", ignoreCase = true)
+        val rate = if (note.rateBcv > 0.001) note.rateBcv else 1.0
+        val width = 800
+        val headerHeight = 310
+        val itemRowHeight = 44
+        val tableHeaderHeight = 44
+        val totalsHeight = 250
+        val contentHeight = headerHeight + tableHeaderHeight + (items.size * itemRowHeight) + totalsHeight + 60
+        val height = contentHeight.coerceAtLeast(820)
+
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.parseColor("#F8FAFC"))
+
+        val paint = Paint().apply {
+            isAntiAlias = true
+            typeface = Typeface.DEFAULT
+        }
+
+        val cardMargin = 20f
+        val cardPaint = Paint().apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val borderPaint = Paint().apply {
+            color = Color.parseColor("#CBD5E1")
+            style = Paint.Style.STROKE
+            strokeWidth = 2f
+            isAntiAlias = true
+        }
+        canvas.drawRoundRect(cardMargin, cardMargin, width - cardMargin, height - cardMargin, 20f, 20f, cardPaint)
+        canvas.drawRoundRect(cardMargin, cardMargin, width - cardMargin, height - cardMargin, 20f, 20f, borderPaint)
+
+        var y = 46f
+
+        // 1. SENIAT Delivery Note Banner (explicit wording requested by user)
+        val bannerPaint = Paint().apply {
+            color = Color.parseColor("#EFF6FF")
+            style = Paint.Style.FILL
+        }
+        val bannerBorderPaint = Paint().apply {
+            color = Color.parseColor("#93C5FD")
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f
+        }
+        canvas.drawRoundRect(40f, y, width - 40f, y + 46f, 10f, 10f, bannerPaint)
+        canvas.drawRoundRect(40f, y, width - 40f, y + 46f, 10f, 10f, bannerBorderPaint)
+
+        paint.color = Color.parseColor("#1E3A8A")
+        paint.textSize = 17f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("NOTA DE ENTREGA • NO VÁLIDO PARA CRÉDITO FISCAL", width / 2f, y + 29f, paint)
+
+        y += 66f
+
+        // 2. Store Details & Logo
+        val leftX = 45f
+        val logoWidth = 124f
+        val logoHeight = 124f
+        val logoX = width - 45f - logoWidth
+        val logoY = y
+
+        var hasLogo = false
+        if (prefs.storeLogoPath.isNotBlank()) {
+            try {
+                val logoFile = File(prefs.storeLogoPath)
+                if (logoFile.exists()) {
+                    val originalBitmap = android.graphics.BitmapFactory.decodeFile(logoFile.absolutePath)
+                    if (originalBitmap != null) {
+                        val scaledLogo = Bitmap.createScaledBitmap(originalBitmap, logoWidth.toInt(), logoHeight.toInt(), true)
+                        canvas.drawBitmap(scaledLogo, logoX, logoY, null)
+                        hasLogo = true
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        if (!hasLogo) {
+            val placeholderPaint = Paint().apply {
+                color = Color.parseColor("#F1F5F9")
+                style = Paint.Style.FILL
+            }
+            val placeholderBorder = Paint().apply {
+                color = Color.parseColor("#E2E8F0")
+                style = Paint.Style.STROKE
+                strokeWidth = 1.5f
+            }
+            canvas.drawRoundRect(logoX, logoY, logoX + logoWidth, logoY + logoHeight, 16f, 16f, placeholderPaint)
+            canvas.drawRoundRect(logoX, logoY, logoX + logoWidth, logoY + logoHeight, 16f, 16f, placeholderBorder)
+
+            paint.color = Color.parseColor("#94A3B8")
+            paint.textSize = 12f
+            paint.textAlign = Paint.Align.CENTER
+            canvas.drawText("LOGO", logoX + (logoWidth / 2f), logoY + (logoHeight / 2f) - 5f, paint)
+            canvas.drawText("COMERCIO", logoX + (logoWidth / 2f), logoY + (logoHeight / 2f) + 12f, paint)
+        }
+
+        paint.textAlign = Paint.Align.LEFT
+        paint.color = Color.parseColor("#0F172A")
+        paint.textSize = 24f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText(prefs.storeName.ifBlank { "MI COMERCIO POS" }.take(24), leftX, y + 25f, paint)
+
+        paint.textSize = 15f
+        paint.typeface = Typeface.DEFAULT
+        paint.color = Color.parseColor("#334155")
+        canvas.drawText("RIF: ${prefs.storeRif.ifBlank { "J-00000000-0" }}", leftX, y + 52f, paint)
+        if (prefs.storeAddress.isNotBlank()) {
+            canvas.drawText(prefs.storeAddress.take(32), leftX, y + 74f, paint)
+        }
+        if (prefs.storePhone.isNotBlank()) {
+            canvas.drawText("Telf: ${prefs.storePhone}", leftX, y + 96f, paint)
+        }
+
+        y += 136f
+
+        // 3. Meta Box
+        val metaPaint = Paint().apply {
+            color = Color.parseColor("#F8FAFC")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(40f, y, width - 40f, y + 76f, 10f, 10f, metaPaint)
+
+        val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+        val dateStr = sdf.format(Date(note.timestamp))
+        val noteCode = note.noteNumber.ifBlank { "NE-${note.id}" }
+
+        paint.textSize = 14f
+        paint.color = Color.parseColor("#0F172A")
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Nota de Entrega N°: $noteCode", leftX + 10f, y + 22f, paint)
+
+        paint.typeface = Typeface.DEFAULT
+        paint.color = Color.parseColor("#64748B")
+        canvas.drawText("Fecha: $dateStr", leftX + 10f, y + 43f, paint)
+        val currencyLabel = if (useBs) "Moneda: Bolívares (Bs.) • Tasa BCV: ${String.format(Locale.US, "%.2f", rate)}" else "Moneda: Dólares ($ USD)"
+        canvas.drawText(currencyLabel, leftX + 10f, y + 63f, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
+        paint.color = Color.parseColor("#0F172A")
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Cliente: ${note.customerName.ifBlank { "Cliente General" }.take(24)}", width - 50f, y + 22f, paint)
+
+        paint.typeface = Typeface.DEFAULT
+        paint.color = Color.parseColor("#64748B")
+        canvas.drawText("CI/RIF: ${note.customerDocument.ifBlank { "V-00000000" }}", width - 50f, y + 43f, paint)
+        if (note.recipientName.isNotBlank()) {
+            canvas.drawText("Recibe: ${note.recipientName.take(22)}", width - 50f, y + 63f, paint)
+        }
+
+        y += 92f
+
+        // 4. Table Header (No IVA column)
+        val tableHeaderPaint = Paint().apply {
+            color = Color.parseColor("#0369A1")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(40f, y, width - 40f, y + tableHeaderHeight, 8f, 8f, tableHeaderPaint)
+
+        paint.color = Color.WHITE
+        paint.textSize = 14f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+
+        paint.textAlign = Paint.Align.LEFT
+        canvas.drawText("Producto / Mercancía", leftX + 10f, y + 28f, paint)
+
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("Cant.", 395f, y + 28f, paint)
+
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText(if (useBs) "P. Venta (Bs.)" else "P. Venta ($)", 575f, y + 28f, paint)
+        canvas.drawText(if (useBs) "Total (Bs.)" else "Total ($)", width - 50f, y + 28f, paint)
+
+        y += tableHeaderHeight + 8f
+
+        // 5. Rows
+        paint.color = Color.parseColor("#1E293B")
+        paint.typeface = Typeface.DEFAULT
+        val rowLinePaint = Paint().apply {
+            color = Color.parseColor("#E2E8F0")
+            strokeWidth = 1f
+        }
+
+        for (item in items) {
+            val unitVal = if (useBs) item.priceUsd * rate else item.priceUsd
+            val lineVal = unitVal * item.quantity
+            val qtyStr = if (item.quantity % 1.0 == 0.0) item.quantity.toInt().toString() else String.format(Locale.US, "%.2f", item.quantity)
+
+            paint.textAlign = Paint.Align.LEFT
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            paint.textSize = 14f
+            canvas.drawText(item.productName.take(24), leftX + 10f, y + 27f, paint)
+
+            paint.typeface = Typeface.DEFAULT
+            paint.textAlign = Paint.Align.CENTER
+            canvas.drawText(qtyStr, 395f, y + 27f, paint)
+
+            paint.textAlign = Paint.Align.RIGHT
+            val unitStr = if (useBs) String.format(Locale.US, "Bs. %.2f", unitVal) else String.format(Locale.US, "$ %.2f", unitVal)
+            val totalStr = if (useBs) String.format(Locale.US, "Bs. %.2f", lineVal) else String.format(Locale.US, "$ %.2f", lineVal)
+            canvas.drawText(unitStr, 575f, y + 27f, paint)
+
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText(totalStr, width - 50f, y + 27f, paint)
+
+            y += itemRowHeight
+            canvas.drawLine(40f, y, width - 40f, y, rowLinePaint)
+            y += 4f
+        }
+
+        y += 18f
+
+        // 6. Grand Total Box (No IVA)
+        val totalBs = if (note.totalEstimatedBs > 0.001) note.totalEstimatedBs else note.totalEstimatedUsd * rate
+        val totalBoxPaint = Paint().apply {
+            color = Color.parseColor("#0F172A")
+            style = Paint.Style.FILL
+        }
+        canvas.drawRoundRect(width - 430f, y, width - 40f, y + 56f, 12f, 12f, totalBoxPaint)
+
+        paint.color = Color.WHITE
+        paint.textSize = 19f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        paint.textAlign = Paint.Align.RIGHT
+        val grandTotalText = if (useBs) {
+            "TOTAL: Bs. ${String.format(Locale.US, "%.2f", totalBs)}"
+        } else {
+            "TOTAL: \$${String.format(Locale.US, "%.2f", note.totalEstimatedUsd)} USD"
+        }
+        canvas.drawText(grandTotalText, width - 60f, y + 35f, paint)
+
+        y += 74f
+
+        if (note.reasonOrObservation.isNotBlank()) {
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = Color.parseColor("#475569")
+            paint.textSize = 13f
+            paint.typeface = Typeface.DEFAULT
+            canvas.drawText("Observación: ${note.reasonOrObservation.take(72)}", leftX, y, paint)
+            y += 26f
+        }
+
+        // Signature / Reception footer
+        val linePaint = Paint().apply {
+            color = Color.parseColor("#94A3B8")
+            strokeWidth = 1.5f
+        }
+        y += 28f
+        canvas.drawLine(leftX + 20f, y, 330f, y, linePaint)
+        canvas.drawLine(width - 330f, y, width - 65f, y, linePaint)
+        y += 18f
+
+        paint.textAlign = Paint.Align.CENTER
+        paint.color = Color.parseColor("#334155")
+        paint.textSize = 12.5f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        canvas.drawText("Entregado Por", (leftX + 20f + 330f) / 2f, y, paint)
+        canvas.drawText("Recibido Conforme", (width - 330f + width - 65f) / 2f, y, paint)
+
+        y += 26f
+        paint.color = Color.parseColor("#64748B")
+        paint.textSize = 12f
+        paint.typeface = Typeface.DEFAULT
+        canvas.drawText("Nota de Entrega • No válido para crédito fiscal • Control de inventario y despacho", width / 2f, y, paint)
+
+        return Bitmap.createBitmap(bitmap, 0, 0, width, (y + 40).toInt().coerceAtMost(height))
     }
 
     fun saveDeliveryNoteBitmapToFile(context: Context, bitmap: Bitmap, noteId: Int): File? {

@@ -39,7 +39,9 @@ data class Product(
     val aisleNumber: String = "",
     val aisleQuantity: Double = 0.0,
     val depotQuantity: Double = 0.0,
-    val counterQuantity: Double = 0.0
+    val counterQuantity: Double = 0.0,
+    val minStockAlertQuantity: Double = 5.0,
+    val isLowStockAlertEnabled: Boolean = true
 ) {
     fun calculateUnitCommission(): Double {
         if (!hasCommission) return 0.0
@@ -77,5 +79,25 @@ data class Product(
             if (prod == null || prod.isRecipe || prod.isCombo) 9999.0
             else prod.stock / maxOf(1.0, comp.quantity)
         } ?: 0.0
+    }
+
+    fun effectiveStockForAlert(allProducts: List<Product> = emptyList()): Double {
+        if (isRecipe) return Double.MAX_VALUE
+        return if (isCombo && allProducts.isNotEmpty()) {
+            calculateAvailableComboStock(allProducts)
+        } else {
+            stock
+        }
+    }
+
+    fun isLowStockAlertTriggered(allProducts: List<Product> = emptyList()): Boolean {
+        if (isRecipe || !isLowStockAlertEnabled) return false
+        if (minStockAlertQuantity < 0.0) return false
+        return effectiveStockForAlert(allProducts) <= (minStockAlertQuantity + 1e-6)
+    }
+
+    fun isOutOfStockAlertTriggered(allProducts: List<Product> = emptyList()): Boolean {
+        if (isRecipe || !isLowStockAlertEnabled) return false
+        return effectiveStockForAlert(allProducts) <= 1e-6
     }
 }

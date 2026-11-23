@@ -21,7 +21,8 @@ data class AccountFullBackup(
     val purchaseInvoices: List<PurchaseInvoice> = emptyList(),
     val suppliers: List<Supplier> = emptyList(),
     val expenses: List<Expense> = emptyList(),
-    val users: List<User> = emptyList()
+    val users: List<User> = emptyList(),
+    val posTerminalRecords: List<PosTerminalRecord> = emptyList()
 )
 
 @Serializable

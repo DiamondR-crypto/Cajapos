@@ -24,8 +24,11 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.Customer
 import com.example.ui.PosViewModel
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.bringIntoViewOnFocus
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun CustomersScreen(viewModel: PosViewModel) {
     val customers by viewModel.allCustomers.collectAsStateWithLifecycle()
@@ -88,9 +91,10 @@ fun CustomersScreen(viewModel: PosViewModel) {
             }
 
             // Category Filter Chips
-            Row(
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 FilterChip(
                     selected = selectedFilterType == "TODOS",
@@ -176,37 +180,38 @@ fun CustomerCardItem(customer: Customer) {
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    customer.name,
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium
-                )
-
-                // SENIAT Type Badge
-                val (badgeBg, badgeText, label) = when (customer.clientType) {
-                    "PERSONA_JURIDICA" -> Triple(Color(0xFFDBEAFE), Color(0xFF1E40AF), "JURÍDICA (J)")
-                    "GOBIERNO" -> Triple(Color(0xFFFEF3C7), Color(0xFF92400E), "GOBIERNO (G)")
-                    else -> Triple(Color(0xFFF3F4F6), Color(0xFF374151), "NATURAL (V/E)")
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = badgeBg
-                ) {
+            ResponsiveActionRow(
+                breakpoint = 300.dp,
+                stackedActionAlignment = Alignment.Start,
+                content = {
                     Text(
-                        label,
-                        fontSize = 10.sp,
+                        customer.name,
                         fontWeight = FontWeight.Bold,
-                        color = badgeText,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        style = MaterialTheme.typography.titleMedium
                     )
+                },
+                action = {
+                    // SENIAT Type Badge
+                    val (badgeBg, badgeText, label) = when (customer.clientType) {
+                        "PERSONA_JURIDICA" -> Triple(Color(0xFFDBEAFE), Color(0xFF1E40AF), "JURÍDICA (J)")
+                        "GOBIERNO" -> Triple(Color(0xFFFEF3C7), Color(0xFF92400E), "GOBIERNO (G)")
+                        else -> Triple(Color(0xFFF3F4F6), Color(0xFF374151), "NATURAL (V/E)")
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = badgeBg
+                    ) {
+                        Text(
+                            label,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeText,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
-            }
+            )
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.Filled.Badge, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
@@ -253,7 +258,7 @@ fun CustomerCardItem(customer: Customer) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddCustomerDialog(
     viewModel: PosViewModel,
@@ -286,7 +291,7 @@ fun AddCustomerDialog(
         }
     }
 
-    AlertDialog(
+    KeyboardAwareAlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(
@@ -294,45 +299,45 @@ fun AddCustomerDialog(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Icon(Icons.Filled.PersonAdd, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Text("Registrar Cliente SENIAT", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 }
-                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Filled.Close, contentDescription = "Cerrar")
                 }
             }
         },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Client Type SENIAT Selector
                 Text("Tipo de Contribuyente / Cliente SENIAT:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     FilterChip(
                         selected = clientType == "PERSONA_NATURAL",
                         onClick = { clientType = "PERSONA_NATURAL" },
-                        label = { Text("Natural (V/E)", fontSize = 11.sp) },
-                        modifier = Modifier.weight(1f)
+                        label = { Text("Natural (V/E)", fontSize = 11.sp) }
                     )
                     FilterChip(
                         selected = clientType == "PERSONA_JURIDICA",
                         onClick = { clientType = "PERSONA_JURIDICA" },
-                        label = { Text("Jurídica (J)", fontSize = 11.sp) },
-                        modifier = Modifier.weight(1f)
+                        label = { Text("Jurídica (J)", fontSize = 11.sp) }
                     )
                     FilterChip(
                         selected = clientType == "GOBIERNO",
                         onClick = { clientType = "GOBIERNO" },
-                        label = { Text("Gobierno (G)", fontSize = 11.sp) },
-                        modifier = Modifier.weight(1f)
+                        label = { Text("Gobierno (G)", fontSize = 11.sp) }
                     )
                 }
 
@@ -344,7 +349,7 @@ fun AddCustomerDialog(
                     placeholder = { Text("Ej: Comercializadora Los Andes C.A.") },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
                 // Document ID (RIF / Cédula) with Prefix Dropdown
@@ -356,7 +361,7 @@ fun AddCustomerDialog(
                     val prefixes = listOf("V-", "J-", "G-", "E-", "P-")
                     var expandedPrefix by remember { mutableStateOf(false) }
 
-                    Box(modifier = Modifier.width(90.dp)) {
+                    Box(modifier = Modifier.width(84.dp)) {
                         OutlinedButton(
                             onClick = { expandedPrefix = true },
                             shape = RoundedCornerShape(10.dp),
@@ -388,7 +393,7 @@ fun AddCustomerDialog(
                         placeholder = { Text("12345678") },
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).bringIntoViewOnFocus()
                     )
                 }
 
@@ -400,7 +405,7 @@ fun AddCustomerDialog(
                     placeholder = { Text("Ej: 0414-1234567") },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
                 OutlinedTextField(
@@ -409,7 +414,7 @@ fun AddCustomerDialog(
                     label = { Text("Dirección Fiscal SENIAT") },
                     placeholder = { Text("Ej: Av. Principal, Edif. Centro, Local 1") },
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -421,24 +426,29 @@ fun AddCustomerDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("¿Es Agente de Retención SENIAT?", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                                Text("Sujeto Pasivo Especial o Ente Público autorizado a retener IVA/ISLR", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ResponsiveActionRow(
+                            breakpoint = 280.dp,
+                            content = {
+                                Column {
+                                    Text("¿Es Agente de Retención SENIAT?", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                    Text("Sujeto Pasivo Especial o Ente Público autorizado a retener IVA/ISLR", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
+                            action = {
+                                Switch(
+                                    checked = isWithholdingAgent,
+                                    onCheckedChange = { isWithholdingAgent = it }
+                                )
                             }
-                            Switch(
-                                checked = isWithholdingAgent,
-                                onCheckedChange = { isWithholdingAgent = it }
-                            )
-                        }
+                        )
 
                         if (isWithholdingAgent) {
                             Text("Porcentaje Retención de IVA:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 FilterChip(
                                     selected = ivaRetentionPercentage == "75",
                                     onClick = { ivaRetentionPercentage = "75" },
@@ -452,7 +462,11 @@ fun AddCustomerDialog(
                             }
 
                             Text("Porcentaje Retención de ISLR:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 listOf("0.0", "1.0", "2.0", "3.0", "5.0").forEach { perc ->
                                     FilterChip(
                                         selected = islrRetentionPercentage == perc,

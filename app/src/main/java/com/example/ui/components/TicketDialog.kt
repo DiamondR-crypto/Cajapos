@@ -15,7 +15,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -25,6 +27,7 @@ import android.widget.Toast
 import com.example.data.local.Sale
 import com.example.data.local.SaleItem
 import com.example.ui.PosViewModel
+import com.example.utils.PdfExportManager
 
 @Composable
 fun TicketDialog(
@@ -48,27 +51,33 @@ fun TicketDialog(
     val printerName by viewModel.printerName.collectAsStateWithLifecycle()
     val allCustomers by viewModel.allCustomers.collectAsStateWithLifecycle()
 
-    val customerPhone = remember(sale, allCustomers) {
-        val matchedCustomer = allCustomers.find {
+    val matchedCustomer = remember(sale, allCustomers) {
+        allCustomers.find {
             (it.documentId.isNotBlank() && it.documentId.equals(sale.customerDocument, ignoreCase = true)) ||
             (it.name.isNotBlank() && it.name.equals(sale.customerName, ignoreCase = true))
         }
-        matchedCustomer?.phone
     }
+    val customerPhone = matchedCustomer?.phone
+    val customerAddress = matchedCustomer?.address ?: ""
 
     val isPrinterConfigured = viewModel.isPrinterConfigured()
     var isPrinting by remember { mutableStateOf(false) }
     var printStatusText by remember { mutableStateOf<String?>(null) }
     var showScanDialog by remember { mutableStateOf(false) }
+    var showPdfExportDialog by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .systemBarsPadding()
+                .padding(14.dp),
             contentAlignment = Alignment.Center
         ) {
             Surface(
@@ -86,7 +95,7 @@ fun TicketDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                         Text("Factura #${sale.id}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         if (isPrinterConfigured) {
                             val connLabel = when (currentPrinterConnectionType) {
@@ -192,60 +201,121 @@ fun TicketDialog(
                     }
 
                     // Secondary actions: PDF, Image, WhatsApp
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                val file = ReceiptPrinter(context, viewModel.prefs).generateReceiptPdf(sale, items)
-                                if (file != null) {
-                                    TicketUtils.shareFile(context, file, "application/pdf")
+                    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                        val wideActions = maxWidth >= 340.dp
+                        if (wideActions) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showPdfExportDialog = true },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("sale_pdf_button"),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("PDF", fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("PDF", fontSize = 13.sp)
-                        }
-                        
-                        OutlinedButton(
-                            onClick = {
-                                val squareBitmap = TicketUtils.generateWhatsAppSquareTicketBitmap(context, viewModel.prefs, sale, items)
-                                val file = TicketUtils.saveBitmapToFile(context, squareBitmap, sale.id)
-                                if (file != null) {
-                                    TicketUtils.shareFile(context, file, "image/png")
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Imagen", fontSize = 13.sp)
-                        }
 
-                        Button(
-                            onClick = {
-                                val squareBitmap = TicketUtils.generateWhatsAppSquareTicketBitmap(context, viewModel.prefs, sale, items)
-                                val file = TicketUtils.saveBitmapToFile(context, squareBitmap, sale.id)
-                                if (file != null) {
-                                    TicketUtils.shareWhatsAppFile(
-                                        context = context,
-                                        file = file,
-                                        phone = customerPhone,
-                                        captionText = "Ticket de Venta N° #${sale.id} - ${viewModel.prefs.storeName}"
-                                    )
+                                OutlinedButton(
+                                    onClick = {
+                                        val squareBitmap = TicketUtils.generateWhatsAppSquareTicketBitmap(context, viewModel.prefs, sale, items)
+                                        val file = TicketUtils.saveBitmapToFile(context, squareBitmap, sale.id)
+                                        if (file != null) {
+                                            TicketUtils.shareFile(context, file, "image/png")
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f).minimumInteractiveComponentSize(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Imagen", fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                            },
-                            modifier = Modifier.weight(1.2f),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("WhatsApp", fontSize = 13.sp)
+
+                                Button(
+                                    onClick = {
+                                        val squareBitmap = TicketUtils.generateWhatsAppSquareTicketBitmap(context, viewModel.prefs, sale, items)
+                                        val file = TicketUtils.saveBitmapToFile(context, squareBitmap, sale.id)
+                                        if (file != null) {
+                                            TicketUtils.shareWhatsAppFile(
+                                                context = context,
+                                                file = file,
+                                                phone = customerPhone,
+                                                captionText = "Ticket de Venta N° #${sale.id} - ${viewModel.prefs.storeName}"
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1.2f).minimumInteractiveComponentSize(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("WhatsApp", fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        } else {
+                            ResponsiveFlowGroup(
+                                horizontalSpacing = 8.dp,
+                                verticalSpacing = 8.dp,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                OutlinedButton(
+                                    onClick = { showPdfExportDialog = true },
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("sale_pdf_button"),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("PDF", fontSize = 12.5.sp)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        val squareBitmap = TicketUtils.generateWhatsAppSquareTicketBitmap(context, viewModel.prefs, sale, items)
+                                        val file = TicketUtils.saveBitmapToFile(context, squareBitmap, sale.id)
+                                        if (file != null) {
+                                            TicketUtils.shareFile(context, file, "image/png")
+                                        }
+                                    },
+                                    modifier = Modifier.minimumInteractiveComponentSize(),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Imagen", fontSize = 12.5.sp)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        val squareBitmap = TicketUtils.generateWhatsAppSquareTicketBitmap(context, viewModel.prefs, sale, items)
+                                        val file = TicketUtils.saveBitmapToFile(context, squareBitmap, sale.id)
+                                        if (file != null) {
+                                            TicketUtils.shareWhatsAppFile(
+                                                context = context,
+                                                file = file,
+                                                phone = customerPhone,
+                                                captionText = "Ticket de Venta N° #${sale.id} - ${viewModel.prefs.storeName}"
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.minimumInteractiveComponentSize(),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("WhatsApp", fontSize = 12.5.sp)
+                                }
+                            }
                         }
                     }
                 }
@@ -257,6 +327,25 @@ fun TicketDialog(
         PrinterScanDialog(
             viewModel = viewModel,
             onDismiss = { showScanDialog = false }
+        )
+    }
+
+    if (showPdfExportDialog) {
+        PdfExportActionDialog(
+            title = "Factura #${sale.id} en PDF",
+            subtitle = "Comprobante de ${sale.customerName.ifBlank { "Consumidor Final" }} • Total: \$${String.format(java.util.Locale.US, "%.2f", sale.totalUsd)} USD",
+            suggestedFileName = "Factura_${sale.id}.pdf",
+            generatePdf = {
+                PdfExportManager.generateSaleInvoicePdf(
+                    context = context,
+                    prefs = viewModel.prefs,
+                    sale = sale,
+                    items = items,
+                    customerPhone = customerPhone ?: "",
+                    customerAddress = customerAddress
+                )
+            },
+            onDismiss = { showPdfExportDialog = false }
         )
     }
 }

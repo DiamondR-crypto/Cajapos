@@ -370,6 +370,32 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "deviceModel", "googleEmail", "lastActiveAt", "createdAt", "updatedAt"]
+    },
+    "FsEncryptedBackup": {
+      "title": "FsEncryptedBackup",
+      "description": "AES-256-GCM encrypted JSON backup snapshot updated every 20 minutes per Google account.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "googleEmail": { "type": "string" },
+        "storeName": { "type": "string" },
+        "storeRif": { "type": "string" },
+        "deviceId": { "type": "string" },
+        "deviceModel": { "type": "string" },
+        "formatVersion": { "type": "integer" },
+        "productsCount": { "type": "integer" },
+        "salesCount": { "type": "integer" },
+        "customersCount": { "type": "integer" },
+        "exportedAtMs": { "type": "integer" },
+        "encryptedPayload": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "googleEmail", "storeName", "storeRif", "deviceId", "deviceModel",
+        "formatVersion", "productsCount", "salesCount", "customersCount",
+        "exportedAtMs", "encryptedPayload", "createdAt", "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -432,6 +458,10 @@
     "/users/{userId}/devices/{deviceId}": {
       "schema": { "$ref": "#/entities/FsDevice" },
       "description": "Connected devices actively sharing the account database."
+    },
+    "/users/{userId}/encrypted_backups/{backupId}": {
+      "schema": { "$ref": "#/entities/FsEncryptedBackup" },
+      "description": "Latest AES-256-GCM encrypted JSON backup updated in-place every 20 minutes."
     }
   }
 }

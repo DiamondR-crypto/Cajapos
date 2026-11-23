@@ -3,12 +3,8 @@ package com.example.ui.summary
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachMoney
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Receipt
@@ -18,10 +14,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.Sale
 import com.example.data.local.SaleItem
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.ResponsiveActionRow
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -73,8 +72,9 @@ fun CashRegisterClosureDialog(
         )
     }.sortedByDescending { it.quantity }
 
-    AlertDialog(
+    KeyboardAwareAlertDialog(
         onDismissRequest = onDismiss,
+        maxWidth = 560.dp,
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -105,9 +105,7 @@ fun CashRegisterClosureDialog(
         },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 480.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Card 1: Ingresos por Medio de Pago
@@ -159,35 +157,50 @@ fun CashRegisterClosureDialog(
                         Text("Desglose Fiscal (SENIAT / Impuestos)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
                         HorizontalDivider(modifier = Modifier.padding(vertical = 3.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Base Imponible (16%):", style = MaterialTheme.typography.bodySmall)
-                            Text("\$${String.format(Locale.US, "%.2f", totalBaseTaxableUsd)} (Bs. ${String.format(Locale.US, "%.2f", totalBaseTaxableBs)})", style = MaterialTheme.typography.bodySmall)
-                        }
+                        ResponsiveActionRow(
+                            breakpoint = 290.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = { Text("Base Imponible (16%):", style = MaterialTheme.typography.bodySmall) },
+                            action = { Text("\$${String.format(Locale.US, "%.2f", totalBaseTaxableUsd)} (Bs. ${String.format(Locale.US, "%.2f", totalBaseTaxableBs)})", style = MaterialTheme.typography.bodySmall) }
+                        )
 
                         if (totalBaseExemptUsd > 0.001) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Ventas Exentas (0%):", style = MaterialTheme.typography.bodySmall, color = Color(0xFF047857))
-                                Text("\$${String.format(Locale.US, "%.2f", totalBaseExemptUsd)} (Bs. ${String.format(Locale.US, "%.2f", totalBaseExemptBs)})", style = MaterialTheme.typography.bodySmall, color = Color(0xFF047857), fontWeight = FontWeight.Medium)
-                            }
+                            ResponsiveActionRow(
+                                breakpoint = 290.dp,
+                                verticalSpacing = 2.dp,
+                                stackedActionAlignment = Alignment.Start,
+                                content = { Text("Ventas Exentas (0%):", style = MaterialTheme.typography.bodySmall, color = Color(0xFF047857)) },
+                                action = { Text("\$${String.format(Locale.US, "%.2f", totalBaseExemptUsd)} (Bs. ${String.format(Locale.US, "%.2f", totalBaseExemptBs)})", style = MaterialTheme.typography.bodySmall, color = Color(0xFF047857), fontWeight = FontWeight.Medium) }
+                            )
                         }
 
                         if (totalDiscountUsd > 0.001) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Descuentos Otorgados (pre-IVA):", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE11D48))
-                                Text("-\$${String.format(Locale.US, "%.2f", totalDiscountUsd)} (-Bs. ${String.format(Locale.US, "%.2f", totalDiscountBs)})", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE11D48), fontWeight = FontWeight.Medium)
-                            }
+                            ResponsiveActionRow(
+                                breakpoint = 290.dp,
+                                verticalSpacing = 2.dp,
+                                stackedActionAlignment = Alignment.Start,
+                                content = { Text("Descuentos Otorgados (pre-IVA):", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE11D48)) },
+                                action = { Text("-\$${String.format(Locale.US, "%.2f", totalDiscountUsd)} (-Bs. ${String.format(Locale.US, "%.2f", totalDiscountBs)})", style = MaterialTheme.typography.bodySmall, color = Color(0xFFE11D48), fontWeight = FontWeight.Medium) }
+                            )
                         }
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("IVA Recaudado (16%):", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                            Text("\$${String.format(Locale.US, "%.2f", totalIvaUsd)} (Bs. ${String.format(Locale.US, "%.2f", totalIvaBs)})", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                        }
+                        ResponsiveActionRow(
+                            breakpoint = 290.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = { Text("IVA Recaudado (16%):", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) },
+                            action = { Text("\$${String.format(Locale.US, "%.2f", totalIvaUsd)} (Bs. ${String.format(Locale.US, "%.2f", totalIvaBs)})", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+                        )
 
                         if (totalIgtfUsd > 0.001) {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("IGTF Divisas (3%):", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB45309))
-                                Text("+\$${String.format(Locale.US, "%.2f", totalIgtfUsd)} (+Bs. ${String.format(Locale.US, "%.2f", totalIgtfBs)})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB45309))
-                            }
+                            ResponsiveActionRow(
+                                breakpoint = 290.dp,
+                                verticalSpacing = 2.dp,
+                                stackedActionAlignment = Alignment.Start,
+                                content = { Text("IGTF Divisas (3%):", style = MaterialTheme.typography.bodySmall, color = Color(0xFFB45309)) },
+                                action = { Text("+\$${String.format(Locale.US, "%.2f", totalIgtfUsd)} (+Bs. ${String.format(Locale.US, "%.2f", totalIgtfBs)})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall, color = Color(0xFFB45309)) }
+                            )
                         }
                     }
                 }
@@ -198,13 +211,11 @@ fun CashRegisterClosureDialog(
                 if (groupedItems.isEmpty()) {
                     Text("No hay productos vendidos hoy.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false),
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        items(groupedItems) { item ->
+                        groupedItems.forEach { item ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -218,7 +229,13 @@ fun CashRegisterClosureDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(item.name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                                    Text(
+                                        item.name,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
                                     if (item.isTaxExempt) {
                                         Surface(
                                             shape = RoundedCornerShape(3.dp),

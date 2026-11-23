@@ -179,13 +179,79 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
         ),
         FunctionDeclaration(
             name = "queryInvoice",
-            description = "Consulta la información de una factura de venta por su número.",
+            description = "Consulta el detalle completo de una factura de venta por su número, incluyendo todos los productos vendidos, cliente y métodos de pago.",
             parameters = FunctionParameters(
                 type = "OBJECT",
                 properties = mapOf(
                     "invoiceNumber" to PropertySchema(type = "STRING", description = "Número de la factura a consultar")
                 ),
                 required = listOf("invoiceNumber")
+            )
+        ),
+        FunctionDeclaration(
+            name = "getLastInvoiceDetail",
+            description = "Obtiene el detalle completo de la última factura de venta registrada (productos vendidos, cantidades, montos, cliente y método de pago).",
+            parameters = FunctionParameters(type = "OBJECT", properties = emptyMap())
+        ),
+        FunctionDeclaration(
+            name = "queryInvoicesByDate",
+            description = "Consulta y resume las facturas emitidas en una fecha o rango de fechas (ej: 'hoy', 'ayer', 'semana', 'mes', '15/11/2026', o startDate + endDate). Numerará las facturas para poder consultar alguna luego.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "period" to PropertySchema(type = "STRING", description = "Período o fecha: 'hoy', 'ayer', 'semana', 'mes' o fecha dd/MM/yyyy"),
+                    "startDate" to PropertySchema(type = "STRING", description = "Fecha inicial dd/MM/yyyy (opcional)"),
+                    "endDate" to PropertySchema(type = "STRING", description = "Fecha final dd/MM/yyyy (opcional)")
+                )
+            )
+        ),
+        FunctionDeclaration(
+            name = "inspectListedInvoice",
+            description = "Muestra el detalle completo de productos de una factura específica de la lista devuelta anteriormente (por su posición 1, 2, 3..., número de factura o nombre del cliente).",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "reference" to PropertySchema(type = "STRING", description = "Posición en la lista (ej. '1', '2', 'primera'), número #id o nombre del cliente")
+                ),
+                required = listOf("reference")
+            )
+        ),
+        FunctionDeclaration(
+            name = "queryCasheaStatus",
+            description = "Consulta el estado de Cashea: total vendido por Cashea, abonos liquidados, deuda pendiente de Cashea y comisiones descontadas (ingresos no recibidos).",
+            parameters = FunctionParameters(type = "OBJECT", properties = emptyMap())
+        ),
+        FunctionDeclaration(
+            name = "queryPendingCredits",
+            description = "Consulta las cuentas por cobrar / créditos pendientes de clientes con sus saldos adeudados.",
+            parameters = FunctionParameters(type = "OBJECT", properties = emptyMap())
+        ),
+        FunctionDeclaration(
+            name = "queryExpensesSummary",
+            description = "Consulta el resumen de gastos operativos registrados ('hoy', 'mes' o 'todos') agrupados por categoría.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "period" to PropertySchema(type = "STRING", description = "Período: 'hoy', 'mes' o 'todos'")
+                )
+            )
+        ),
+        FunctionDeclaration(
+            name = "getInventoryValuation",
+            description = "Calcula el capital invertido al costo, el valor total de venta del inventario actual, ganancia proyectada y conteo de productos agotados o con bajo stock.",
+            parameters = FunctionParameters(type = "OBJECT", properties = emptyMap())
+        ),
+        FunctionDeclaration(
+            name = "updateProductPrice",
+            description = "Prepara la actualización rápida del precio de venta (y opcionalmente precio al mayor) de un producto existente en el inventario.",
+            parameters = FunctionParameters(
+                type = "OBJECT",
+                properties = mapOf(
+                    "productName" to PropertySchema(type = "STRING", description = "Nombre o código del producto"),
+                    "newPriceUsd" to PropertySchema(type = "NUMBER", description = "Nuevo precio de venta al detal en USD"),
+                    "newWholesaleUsd" to PropertySchema(type = "NUMBER", description = "Nuevo precio al mayor en USD (opcional)")
+                ),
+                required = listOf("productName", "newPriceUsd")
             )
         ),
         FunctionDeclaration(
@@ -254,7 +320,7 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
                 properties = mapOf(
                     "module" to PropertySchema(
                         type = "STRING",
-                        description = "Nombre del módulo: 'pos' (facturación), 'quotes' (presupuestos), 'inventory' (inventario), 'invoices' (facturas), 'expenses' (gastos), 'summary' (resumen), 'customers' (clientes), 'suppliers' (proveedores), 'settings' (ajustes)"
+                        description = "Nombre del módulo: 'pos' (facturación), 'quotes' (presupuestos), 'inventory' (inventario), 'invoices' (facturas), 'cashea' (cashea), 'expenses' (gastos), 'summary' (resumen), 'customers' (clientes), 'suppliers' (proveedores), 'settings' (ajustes)"
                     )
                 ),
                 required = listOf("module")
@@ -283,7 +349,7 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
     fun getEffectiveModel(): String {
         val model = prefs?.geminiSelectedModel?.trim().orEmpty()
         if (model.isNotBlank()) return model
-        return "gemini-3.5-flash"
+        return "gemini-3.5-flash-lite"
     }
 
     fun getLiveModel(): String = "models/gemini-2.5-flash-native-audio-preview-12-2025"
@@ -333,12 +399,12 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
 
             CAPACIDADES Y REGLAS ESTRICTAS:
             1. PRESUPUESTOS: Si el usuario pide crear, armar o cotizar un presupuesto, usa 'createQuote' buscando los productos reales del inventario. Si ya hay un presupuesto pendiente y el usuario corrige cantidades, agrega/quita productos, cambia cliente, WhatsApp, validez o descuento, usa 'updatePendingQuote'.
-            2. PRODUCTOS Y CORRECCIONES EN VIVO: Usa 'registerNewProduct' para productos nuevos. Si ya hay un producto pendiente y el usuario hace correcciones en vivo (cambia precio, costo, código, porcentaje de ganancia, precio al mayor, stock o exento), usa 'updatePendingProduct'.
+            2. PRODUCTOS Y CORRECCIONES EN VIVO: Usa 'registerNewProduct' para productos nuevos o 'updateProductPrice' para cambiar precios de productos existentes. Si ya hay un producto pendiente y el usuario hace correcciones en vivo (cambia precio, costo, código, porcentaje de ganancia, precio al mayor, stock o exento), usa 'updatePendingProduct'.
             $marginRule
             3. CONFIRMACIÓN POR VOZ/CHAT: Si hay una acción pendiente y el usuario dice "sí", "confirma", "guárdalo" o "listo", llama a 'confirmCurrentAction'. Si dice "no" o "cancela", llama a 'cancelCurrentAction'.
-            4. OTRAS FUNCIONES: Puedes añadir stock ('addStock'), registrar clientes ('registerCustomer'), registrar gastos ('registerExpense'), registrar facturas de compra ('registerPurchaseInvoice'), actualizar tasa BCV ('updateBcvRate'), consultar presupuestos ('queryQuotes'), clientes ('queryCustomers'), facturas ('queryInvoice'), bajo stock ('queryLowStock') o navegar a pantallas ('navigateToModule').
-            5. CONSULTAS Y RAZONAMIENTO: Usa herramientas de consulta si necesitas datos exactos antes de responder o proponer un presupuesto.
-            6. REGLA ESTRICTA DE IDIOMA Y EXTENSIÓN: Responde SIEMPRE Y EXCLUSIVAMENTE EN ESPAÑOL. NUNCA respondas en inglés. En modo Live / voz (y chat), da respuestas EXTREMADAMENTE CORTAS, BREVES Y PUNTUALES (máximo 1 o 2 oraciones directas). No des explicaciones largas, descripciones detalladas ni información excesiva; ve directo al grano para que el flujo de trabajo sea rápido, ágil y cómodo.
+            4. FACTURAS Y CONSULTAS POR FECHA: Usa 'getLastInvoiceDetail' para el detalle de la última factura, 'queryInvoicesByDate' para resúmenes por fecha o rango (numerando resultados), 'inspectListedInvoice' si el usuario pide ver una factura de esa lista anterior (ej. "la 2", "la de María"), y 'queryInvoice' para una factura por número.
+            5. FINANZAS E INVENTARIO: Usa 'queryCasheaStatus' (deuda/comisiones de Cashea), 'queryPendingCredits' (cuentas por cobrar), 'queryExpensesSummary' (gastos), 'getInventoryValuation' (valor total de inventario), 'queryLowStock' (bajo stock), 'queryQuotes', 'queryCustomers', 'addStock', 'registerCustomer', 'registerExpense', 'registerPurchaseInvoice', 'updateBcvRate' o 'navigateToModule'.
+            6. REGLA ESTRICTA DE IDIOMA Y EXTENSIÓN: Responde SIEMPRE Y EXCLUSIVAMENTE EN ESPAÑOL. NUNCA respondas en inglés. En modo Live / voz (y chat), da respuestas CLARAS, DIRECTAS Y PUNTUALES sin relleno innecesario para que el flujo de trabajo sea rápido y cómodo.
         """.trimIndent()
     }
 
@@ -492,7 +558,7 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
 
         try {
             val response = service.generateContent(
-                model = model.ifBlank { "gemini-3.5-flash" },
+                model = model.ifBlank { "gemini-3.5-flash-lite" },
                 apiKey = keyToTest,
                 request = request
             )
@@ -501,6 +567,150 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
                 Result.success("Conexión exitosa con $model.")
             } else {
                 Result.failure(Exception("Respuesta vacía de Gemini."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun extractPurchaseInvoiceFromImage(
+        imageBase64: String,
+        ocrRawText: String,
+        suppliersSummary: String,
+        catalogSummary: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val apiKey = getEffectiveApiKeyOrNull()
+            ?: return@withContext Result.failure(Exception("No hay clave API de Gemini configurada."))
+
+        val model = getEffectiveModel()
+        val prompt = """
+            Analiza la imagen de esta factura de compra y el texto OCR extraído de apoyo.
+            Extrae ÚNICAMENTE un objeto JSON válido (sin markdown, sin texto adicional) con esta estructura exacta:
+            {
+              "supplierName": "Nombre o razón social del proveedor",
+              "invoiceNumber": "Número de factura o control",
+              "currency": "USD o VES (según estén impresos los precios en la factura: $ / USD = USD, Bs / Bs.S / VES = VES)",
+              "subtotalAmount": 0.00,
+              "hasIva": false,
+              "ivaPercentage": 16.0,
+              "ivaAmount": 0.00,
+              "totalAmountUsd": 0.00,
+              "items": [
+                {
+                  "name": "Nombre limpio del producto",
+                  "quantity": 1.0,
+                  "unitCostUsd": 0.00,
+                  "lineTotalUsd": 0.00,
+                  "isTaxExempt": false
+                }
+              ]
+            }
+
+            REGLAS:
+            1. NO conviertas monedas: devuelve los montos unitCostUsd, lineTotalUsd, subtotalAmount, ivaAmount y totalAmountUsd exactamente en la moneda impresa en la factura ('USD' o 'VES') e indica correctamente el campo "currency".
+            2. Si la factura muestra IVA desglosado (ej. IVA 16% o IVA 8%), pon "hasIva": true, su porcentaje en "ivaPercentage" y el monto en "ivaAmount". Si algún producto tiene marca (E) o Exento, pon "isTaxExempt": true.
+            3. Si el nombre del producto coincide con alguno del catálogo actual, usa preferiblemente el nombre exacto del catálogo para facilitar la suma automática al inventario.
+            4. Si el proveedor coincide con uno registrado, usa su nombre exacto.
+            5. Todos los montos numéricos deben ser números decimales positivos. No inventes productos que no estén en la factura.
+
+            PROVEEDORES REGISTRADOS:
+            $suppliersSummary
+
+            CATÁLOGO ACTUAL (muestra):
+            $catalogSummary
+
+            TEXTO OCR DETECTADO EN DISPOSITIVO:
+            $ocrRawText
+        """.trimIndent()
+
+        val parts = mutableListOf(Part(text = prompt))
+        if (imageBase64.isNotBlank()) {
+            parts.add(Part(inlineData = InlineData(mimeType = "image/jpeg", data = imageBase64)))
+        }
+
+        val request = GenerateContentRequest(
+            contents = listOf(Content(role = "user", parts = parts))
+        )
+
+        try {
+            val response = service.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request
+            )
+            val text = response.candidates?.firstOrNull()?.content?.parts
+                ?.mapNotNull { it.text }
+                ?.joinToString("\n")
+                ?.trim()
+                .orEmpty()
+            if (text.isNotBlank()) {
+                Result.success(text)
+            } else {
+                Result.failure(Exception("Gemini devolvió una respuesta vacía al analizar la factura."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun extractPosTicketFromImage(
+        imageBase64: String,
+        ocrRawText: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val apiKey = getEffectiveApiKeyOrNull()
+            ?: return@withContext Result.failure(Exception("No hay clave API de Gemini configurada."))
+
+        val model = getEffectiveModel()
+        val prompt = """
+            Analiza la imagen de este ticket/voucher de punto de venta (POS bancario) y el texto OCR de apoyo.
+            Extrae ÚNICAMENTE un objeto JSON válido (sin markdown, sin texto adicional) con esta estructura exacta:
+            {
+              "transactionDateTime": "dd/MM/yyyy HH:mm (fecha y hora impresa en el ticket)",
+              "receiptNumber": "Número de recibo o ticket (ej. 000123)",
+              "referenceNumber": "Número de referencia / trace / STAN (ej. 004512)",
+              "approvalNumber": "Número de aprobación / autorización (ej. 849201)",
+              "maskedCardNumber": "Número de tarjeta enmascarado tal como aparece (ej. 4512********8901 o **** 8901)",
+              "operationType": "Tipo de operación (COMPRA, COMPRA DÉBITO, COMPRA CRÉDITO, ANULACIÓN, DEVOLUCIÓN)",
+              "totalAmount": 0.00,
+              "currency": "VES o USD (VES si está en Bs./Bs.S/Bolívares, USD si está en $ o Dólares)",
+              "transactionStatus": "APROBADA, RECHAZADA, ANULADA o PENDIENTE",
+              "bankOrTerminal": "Nombre del banco / adquirente o ID del terminal si aparece"
+            }
+
+            REGLAS:
+            1. Si algún campo no es visible en el ticket, devuelve cadena vacía "" (o 0.0 para totalAmount).
+            2. En "maskedCardNumber", conserva el enmascaramiento y los últimos 4 dígitos visibles.
+            3. En "totalAmount", devuelve únicamente el número decimal positivo del monto total.
+            4. En "transactionStatus", normaliza estrictamente a uno de: APROBADA, RECHAZADA, ANULADA, PENDIENTE.
+
+            TEXTO OCR DETECTADO EN DISPOSITIVO:
+            $ocrRawText
+        """.trimIndent()
+
+        val parts = mutableListOf(Part(text = prompt))
+        if (imageBase64.isNotBlank()) {
+            parts.add(Part(inlineData = InlineData(mimeType = "image/jpeg", data = imageBase64)))
+        }
+
+        val request = GenerateContentRequest(
+            contents = listOf(Content(role = "user", parts = parts))
+        )
+
+        try {
+            val response = service.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request
+            )
+            val text = response.candidates?.firstOrNull()?.content?.parts
+                ?.mapNotNull { it.text }
+                ?.joinToString("\n")
+                ?.trim()
+                .orEmpty()
+            if (text.isNotBlank()) {
+                Result.success(text)
+            } else {
+                Result.failure(Exception("Gemini devolvió una respuesta vacía al analizar el ticket."))
             }
         } catch (e: Exception) {
             Result.failure(e)

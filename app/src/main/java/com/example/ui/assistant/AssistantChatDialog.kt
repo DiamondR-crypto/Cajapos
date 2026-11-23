@@ -42,16 +42,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.Quote
 import com.example.data.local.QuoteItem
 import com.example.ui.PosViewModel
+import com.example.ui.components.KeyboardAwareDialog
 import com.example.ui.components.QuoteTicketDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.ResponsivePair
+import com.example.ui.components.bringIntoViewOnFocus
 import com.example.utils.GeminiLiveStatus
 import com.example.utils.SpeechToTextManager
 import com.example.utils.TextToSpeechManager
@@ -60,7 +63,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AssistantChatDialog(
     viewModel: PosViewModel,
@@ -97,6 +100,8 @@ fun AssistantChatDialog(
     var partialSpeechText by remember { mutableStateOf("") }
     var rmsLevel by remember { mutableStateOf(0f) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
+    var showInvoiceOcrDialog by remember { mutableStateOf(false) }
+    var showAssistantCapabilitiesDialog by remember { mutableStateOf(false) }
     var editingProductEntry by remember { mutableStateOf<Pair<String, PendingAssistantAction.CreateProductAction>?>(null) }
     var editingQuoteEntry by remember { mutableStateOf<Pair<String, PendingAssistantAction.CreateQuoteAction>?>(null) }
     var selectedQuoteForTicket by remember { mutableStateOf<Quote?>(null) }
@@ -216,57 +221,51 @@ fun AssistantChatDialog(
         }
     }
 
-    val modelLabel = if (customApiKey.isNotBlank()) "Gemini $selectedModel (De Pago)" else "Gemini 3.5 Flash (Nivel Gratuito)"
+    val displayModelName = when (selectedModel) {
+        "gemini-3.5-flash-lite" -> "Gemini 3.5 Flash-Lite"
+        "gemini-3.8-flash" -> "Gemini 3.8 Flash"
+        "gemini-3.1-pro-preview" -> "Gemini 3.1 Pro"
+        else -> "Gemini $selectedModel"
+    }
+    val modelLabel = if (customApiKey.isNotBlank()) "$displayModelName (Propio)" else "$displayModelName (Gratis)"
 
-    Dialog(
+    KeyboardAwareDialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        maxWidth = 620.dp,
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Color(0xFF0F172A),
+        tonalElevation = 16.dp,
+        border = BorderStroke(1.dp, Color(0xFF334155)),
+        horizontalPadding = 10.dp,
+        verticalPadding = 10.dp,
+        modifier = Modifier.fillMaxHeight(0.92f)
     ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.65f))
-                .imePadding()
-                .padding(12.dp),
-            contentAlignment = Alignment.Center
+        Column(
+            modifier = Modifier.fillMaxSize()
         ) {
-            val isWide = maxWidth > 650.dp
-            val dialogWidth = if (isWide) 620.dp else maxWidth
-            val dialogHeight = if (maxHeight > 750.dp) 700.dp else maxHeight
-
-            Card(
+            // Header
+            Box(
                 modifier = Modifier
-                    .width(dialogWidth)
-                    .height(dialogHeight),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = BorderStroke(1.dp, Color(0xFF334155)),
-                elevation = CardDefaults.cardElevation(16.dp)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(Color(0xFF1E1B4B), Color(0xFF1E293B))
+                        )
+                    )
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Column(
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    // Header
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(Color(0xFF1E1B4B), Color(0xFF1E293B))
-                                )
-                            )
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+                ResponsiveActionRow(
+                    breakpoint = 460.dp,
+                    verticalSpacing = 6.dp,
+                    stackedActionAlignment = Alignment.End,
+                    content = {
                         Row(
-                            modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(36.dp)
                                     .clip(CircleShape)
                                     .background(
                                         Brush.linearGradient(
@@ -283,94 +282,125 @@ fun AssistantChatDialog(
                                     if (isGeminiLiveActive) Icons.Filled.GraphicEq else Icons.Filled.AutoAwesome,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     "Asistente POS IA",
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Surface(
-                                        shape = RoundedCornerShape(6.dp),
+                                        shape = RoundedCornerShape(5.dp),
                                         color = Color(0xFF3B82F6).copy(alpha = 0.25f)
                                     ) {
                                         Text(
                                             text = currentUser?.role ?: "ADMIN",
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            fontSize = 10.sp,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                            fontSize = 9.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF93C5FD)
                                         )
                                     }
                                     Text(
                                         text = if (isGeminiLiveActive) "• En Vivo" else "• $modelLabel",
-                                        fontSize = 11.sp,
+                                        fontSize = 10.5.sp,
                                         color = if (isGeminiLiveActive) Color(0xFF34D399) else Color(0xFF94A3B8),
-                                        maxLines = 1
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                         }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    },
+                    action = {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            // Gemini Live Toggle Pill
-                            Surface(
-                                onClick = { handleToggleGeminiLive() },
+                            // Interruptor LIVE
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(
+                                        if (isGeminiLiveActive) Color(0xFF065F46).copy(alpha = 0.75f)
+                                        else Color(0xFF1E293B).copy(alpha = 0.9f)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isGeminiLiveActive) Color(0xFF34D399) else Color(0xFF475569),
+                                        RoundedCornerShape(20.dp)
+                                    )
+                                    .clickable { handleToggleGeminiLive() }
+                                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                                    .padding(start = 8.dp, end = 4.dp)
+                                    .testTag("assistant_gemini_live_toggle")
+                            ) {
+                                Text(
+                                    text = "LIVE",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 0.5.sp,
+                                    color = if (isGeminiLiveActive) Color(0xFF6EE7B7) else Color(0xFFE2E8F0)
+                                )
+                                Switch(
+                                    checked = isGeminiLiveActive,
+                                    onCheckedChange = null,
+                                    modifier = Modifier.graphicsLayer {
+                                        scaleX = 0.74f
+                                        scaleY = 0.74f
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = Color(0xFF10B981),
+                                        uncheckedThumbColor = Color(0xFFCBD5E1),
+                                        uncheckedTrackColor = Color(0xFF334155),
+                                        uncheckedBorderColor = Color(0xFF64748B)
+                                    )
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { showAssistantCapabilitiesDialog = true },
                                 modifier = Modifier
                                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                                    .testTag("assistant_gemini_live_toggle"),
-                                shape = RoundedCornerShape(24.dp),
-                                color = if (isGeminiLiveActive) Color(0xFF059669) else Color(0xFF1E293B),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isGeminiLiveActive) Color(0xFF34D399) else Color(0xFF6366F1)
-                                )
+                                    .testTag("assistant_help_button"),
+                                colors = IconButtonDefaults.iconButtonColors(contentColor = Color(0xFF93C5FD))
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    Icon(
-                                        if (isGeminiLiveActive) Icons.Filled.GraphicEq else Icons.Filled.Podcasts,
-                                        contentDescription = "Activar o desactivar Gemini Live",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "Gemini Live",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
-                                }
+                                Icon(
+                                    Icons.Filled.Info,
+                                    contentDescription = "Funciones del asistente"
+                                )
                             }
 
                             IconButton(
                                 onClick = { viewModel.clearAssistantChat() },
+                                modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                                 colors = IconButtonDefaults.iconButtonColors(contentColor = Color(0xFF94A3B8))
                             ) {
                                 Icon(Icons.Filled.Refresh, contentDescription = "Reiniciar Chat")
                             }
                             IconButton(
                                 onClick = onDismiss,
+                                modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                                 colors = IconButtonDefaults.iconButtonColors(contentColor = Color(0xFF94A3B8))
                             ) {
                                 Icon(Icons.Filled.Close, contentDescription = "Cerrar")
                             }
                         }
                     }
+                )
+            }
 
                     // Gemini Live Active Banner (Waveform, Status, Mute & Live Transcripts)
                     AnimatedVisibility(visible = isGeminiLiveActive) {
@@ -468,6 +498,42 @@ fun AssistantChatDialog(
                     ) {
                         item {
                             SuggestionChip(
+                                text = "📸 Escanear Factura",
+                                onClick = { showInvoiceOcrDialog = true }
+                            )
+                        }
+                        item {
+                            SuggestionChip(
+                                text = "🧾 Última Factura",
+                                onClick = { viewModel.sendAssistantMessage("Detalle de la última factura") }
+                            )
+                        }
+                        item {
+                            SuggestionChip(
+                                text = "📅 Facturas de Hoy",
+                                onClick = { viewModel.sendAssistantMessage("Resumen de facturas de hoy") }
+                            )
+                        }
+                        item {
+                            SuggestionChip(
+                                text = "💳 Estado Cashea",
+                                onClick = { viewModel.sendAssistantMessage("Resumen de Cashea") }
+                            )
+                        }
+                        item {
+                            SuggestionChip(
+                                text = "💎 Valor Inventario",
+                                onClick = { viewModel.sendAssistantMessage("Valor del inventario") }
+                            )
+                        }
+                        item {
+                            SuggestionChip(
+                                text = "📒 Cuentas por Cobrar",
+                                onClick = { viewModel.sendAssistantMessage("Cuentas por cobrar") }
+                            )
+                        }
+                        item {
+                            SuggestionChip(
                                 text = "📋 Crear Presupuesto",
                                 onClick = { inputText = "Crear presupuesto para  con " }
                             )
@@ -516,145 +582,213 @@ fun AssistantChatDialog(
                         }
                     }
 
-                    // Input Bar
-                    Row(
+                    // Input Bar (adaptativo para que el campo de texto siempre tenga buen ancho)
+                    val infiniteTransition = rememberInfiniteTransition(label = "mic_anim")
+                    val scale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = if (isListening) 1.25f else 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "scale"
+                    )
+                    val micPulseAlpha by infiniteTransition.animateFloat(
+                        initialValue = 0.3f,
+                        targetValue = if (isListening) 0.8f else 0.3f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(500, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "alpha"
+                    )
+                    val hasText = inputText.isNotBlank()
+
+                    BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color(0xFF0F172A))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
                     ) {
-                        // Botón para Cargar Inventario CSV
-                        IconButton(
-                            onClick = { showCsvImportDialog = true },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF064E3B)),
-                            colors = IconButtonDefaults.iconButtonColors(
-                                contentColor = Color(0xFF34D399)
-                            )
-                        ) {
-                            Icon(
-                                Icons.Filled.UploadFile,
-                                contentDescription = "Cargar Inventario CSV",
-                                modifier = Modifier.size(22.dp)
-                            )
+                        val compactInputBar = maxWidth < 460.dp
+
+                        val ocrButton: @Composable () -> Unit = {
+                            IconButton(
+                                onClick = { showInvoiceOcrDialog = true },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1E3A8A))
+                                    .testTag("assistant_scan_invoice_button"),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    contentColor = Color(0xFF93C5FD)
+                                )
+                            ) {
+                                Icon(
+                                    Icons.Filled.DocumentScanner,
+                                    contentDescription = "Escanear Factura (Cámara o Imagen)",
+                                    modifier = Modifier.size(21.dp)
+                                )
+                            }
                         }
 
-                        // Mic Button
-                        val infiniteTransition = rememberInfiniteTransition(label = "mic_anim")
-                        val scale by infiniteTransition.animateFloat(
-                            initialValue = 1f,
-                            targetValue = if (isListening) 1.25f else 1f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(500, easing = LinearEasing),
-                                repeatMode = RepeatMode.Reverse
-                            ),
-                            label = "scale"
-                        )
-                        val micPulseAlpha by infiniteTransition.animateFloat(
-                            initialValue = 0.3f,
-                            targetValue = if (isListening) 0.8f else 0.3f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(500, easing = LinearEasing),
-                                repeatMode = RepeatMode.Reverse
-                            ),
-                            label = "alpha"
-                        )
-
-                        IconButton(
-                            onClick = { launchVoiceRecognition() },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isListening) Color(0xFF0EA5E9).copy(alpha = micPulseAlpha) else Color(0xFF1E293B)
+                        val csvButton: @Composable () -> Unit = {
+                            IconButton(
+                                onClick = { showCsvImportDialog = true },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF064E3B)),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    contentColor = Color(0xFF34D399)
                                 )
-                                .then(
-                                    if (isListening) Modifier.graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                    } else Modifier
+                            ) {
+                                Icon(
+                                    Icons.Filled.UploadFile,
+                                    contentDescription = "Cargar Inventario CSV",
+                                    modifier = Modifier.size(21.dp)
+                                )
+                            }
+                        }
+
+                        val micButton: @Composable () -> Unit = {
+                            IconButton(
+                                onClick = { launchVoiceRecognition() },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isListening) Color(0xFF0EA5E9).copy(alpha = micPulseAlpha) else Color(0xFF1E293B)
+                                    )
+                                    .then(
+                                        if (isListening) Modifier.graphicsLayer {
+                                            scaleX = scale
+                                            scaleY = scale
+                                        } else Modifier
+                                    ),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    contentColor = if (isListening) Color.White else Color(0xFF38BDF8)
+                                )
+                            ) {
+                                Icon(
+                                    if (isListening) Icons.Filled.MicNone else Icons.Filled.Mic,
+                                    contentDescription = "Dictar por Voz"
+                                )
+                            }
+                        }
+
+                        val chatInputField: @Composable (Modifier) -> Unit = { mod ->
+                            TextField(
+                                value = inputText,
+                                onValueChange = { inputText = it },
+                                placeholder = {
+                                    Text(
+                                        "Escribe tu consulta o solicitud...",
+                                        fontSize = 13.sp,
+                                        color = Color(0xFF64748B),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                modifier = mod.heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(22.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    imeAction = ImeAction.Send,
+                                    capitalization = KeyboardCapitalization.Sentences
                                 ),
-                            colors = IconButtonDefaults.iconButtonColors(
-                                contentColor = if (isListening) Color.White else Color(0xFF38BDF8)
-                            )
-                        ) {
-                            Icon(
-                                if (isListening) Icons.Filled.MicNone else Icons.Filled.Mic,
-                                contentDescription = "Dictar por Voz"
+                                keyboardActions = KeyboardActions(
+                                    onSend = {
+                                        if (inputText.isNotBlank()) {
+                                            val textToSend = inputText.trim()
+                                            inputText = ""
+                                            viewModel.sendAssistantMessage(textToSend)
+                                        }
+                                    }
+                                ),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color(0xFF1E293B),
+                                    unfocusedContainerColor = Color(0xFF1E293B),
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    cursorColor = Color(0xFF38BDF8)
+                                ),
+                                maxLines = 3
                             )
                         }
 
-                        // Text Field
-                        TextField(
-                            value = inputText,
-                            onValueChange = { inputText = it },
-                            placeholder = {
-                                Text(
-                                    "Escribe tu consulta o solicitud...",
-                                    fontSize = 13.sp,
-                                    color = Color(0xFF64748B)
-                                )
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 44.dp),
-                            shape = RoundedCornerShape(22.dp),
-                            keyboardOptions = KeyboardOptions(
-                                imeAction = ImeAction.Send,
-                                capitalization = KeyboardCapitalization.Sentences
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onSend = {
-                                    if (inputText.isNotBlank()) {
+                        val sendButton: @Composable () -> Unit = {
+                            IconButton(
+                                onClick = {
+                                    if (hasText) {
                                         val textToSend = inputText.trim()
                                         inputText = ""
                                         viewModel.sendAssistantMessage(textToSend)
                                     }
-                                }
-                            ),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color(0xFF1E293B),
-                                unfocusedContainerColor = Color(0xFF1E293B),
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                cursorColor = Color(0xFF38BDF8)
-                            ),
-                            maxLines = 3
-                        )
+                                },
+                                enabled = hasText,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (hasText) Color(0xFF3B82F6) else Color(0xFF1E293B)
+                                    ),
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    contentColor = if (hasText) Color.White else Color(0xFF64748B)
+                                )
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar")
+                            }
+                        }
 
-                        // Send Button
-                        val hasText = inputText.isNotBlank()
-                        IconButton(
-                            onClick = {
-                                if (hasText) {
-                                    val textToSend = inputText.trim()
-                                    inputText = ""
-                                    viewModel.sendAssistantMessage(textToSend)
+                        if (!compactInputBar) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ocrButton()
+                                csvButton()
+                                micButton()
+                                chatInputField(Modifier.weight(1f))
+                                sendButton()
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    micButton()
+                                    chatInputField(Modifier.weight(1f))
+                                    sendButton()
                                 }
-                            },
-                            enabled = hasText,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (hasText) Color(0xFF3B82F6) else Color(0xFF1E293B)
-                                ),
-                            colors = IconButtonDefaults.iconButtonColors(
-                                contentColor = if (hasText) Color.White else Color(0xFF64748B)
-                            )
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Enviar")
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    ocrButton()
+                                    csvButton()
+                                    Text(
+                                        text = "Escáner OCR de factura o carga CSV",
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
 
         if (showCsvImportDialog) {
             com.example.ui.inventory.CsvInventoryImportDialog(
@@ -662,6 +796,28 @@ fun AssistantChatDialog(
                 onDismiss = { showCsvImportDialog = false },
                 onImportCompleted = { resultMsg ->
                     viewModel.notifyAssistantCsvImportCompleted(resultMsg)
+                }
+            )
+        }
+
+        if (showInvoiceOcrDialog) {
+            InvoiceOcrImportDialog(
+                viewModel = viewModel,
+                onDismiss = { showInvoiceOcrDialog = false }
+            )
+        }
+
+        if (showAssistantCapabilitiesDialog) {
+            AssistantCapabilitiesDialog(
+                modelLabel = modelLabel,
+                onDismiss = { showAssistantCapabilitiesDialog = false },
+                onTryCommand = { exampleCmd ->
+                    showAssistantCapabilitiesDialog = false
+                    if (exampleCmd == "__OPEN_INVOICE_OCR__") {
+                        showInvoiceOcrDialog = true
+                    } else {
+                        viewModel.sendAssistantMessage(exampleCmd)
+                    }
                 }
             )
         }
@@ -709,7 +865,6 @@ fun AssistantChatDialog(
                 )
             }
         }
-    }
 }
 
 @Composable
@@ -1102,43 +1257,47 @@ private fun CreateProductConfirmationCard(
                 Text("Modificar / Agregar Info (Código, % Ganancia, Mayor)", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onConfirm,
-                    enabled = canConfirm,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("assistant_confirm_product_button"),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF059669),
-                        disabledContainerColor = Color(0xFF334155)
-                    )
-                ) {
-                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Sí, Confirmar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            ResponsivePair(
+                breakpoint = 300.dp,
+                horizontalSpacing = 8.dp,
+                verticalSpacing = 8.dp,
+                first = { mod ->
+                    Button(
+                        onClick = onConfirm,
+                        enabled = canConfirm,
+                        modifier = mod
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("assistant_confirm_product_button"),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF059669),
+                            disabledContainerColor = Color(0xFF334155)
+                        )
+                    ) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Sí, Confirmar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
+                second = { mod ->
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = mod.defaultMinSize(minHeight = 48.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                        border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("No, Cancelar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                    border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
-                ) {
-                    Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("No, Cancelar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
+            )
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditPendingProductDialog(
     initialAction: PendingAssistantAction.CreateProductAction,
@@ -1188,61 +1347,74 @@ private fun EditPendingProductDialog(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = Color(0xFF0F172A),
-            border = BorderStroke(1.dp, Color(0xFF334155)),
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 540.dp,
+        shape = RoundedCornerShape(20.dp),
+        containerColor = Color(0xFF0F172A),
+        border = BorderStroke(1.dp, Color(0xFF334155))
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp)
+                .padding(18.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(18.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Filled.EditNote, contentDescription = null, tint = Color(0xFF38BDF8))
-                        Text(
-                            "Modificar / Completar Producto",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color(0xFF94A3B8))
-                    }
+                    Icon(Icons.Filled.EditNote, contentDescription = null, tint = Color(0xFF38BDF8))
+                    Text(
+                        "Modificar / Completar Producto",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color(0xFF94A3B8))
+                }
+            }
 
-                val fieldColors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF38BDF8),
-                    unfocusedBorderColor = Color(0xFF475569),
-                    focusedLabelColor = Color(0xFF38BDF8),
-                    unfocusedLabelColor = Color(0xFF94A3B8)
-                )
+            val fieldColors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedBorderColor = Color(0xFF38BDF8),
+                unfocusedBorderColor = Color(0xFF475569),
+                focusedLabelColor = Color(0xFF38BDF8),
+                unfocusedLabelColor = Color(0xFF94A3B8)
+            )
 
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it; errorMsg = "" },
-                    label = { Text("Nombre del Producto *") },
-                    leadingIcon = { Icon(Icons.Filled.ShoppingBag, contentDescription = null, tint = Color(0xFF94A3B8)) },
-                    singleLine = true,
-                    colors = fieldColors,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("assistant_edit_name")
-                )
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it; errorMsg = "" },
+                label = { Text("Nombre del Producto *") },
+                leadingIcon = { Icon(Icons.Filled.ShoppingBag, contentDescription = null, tint = Color(0xFF94A3B8)) },
+                singleLine = true,
+                colors = fieldColors,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewOnFocus()
+                    .testTag("assistant_edit_name")
+            )
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ResponsivePair(
+                breakpoint = 340.dp,
+                first = { mod ->
                     OutlinedTextField(
                         value = code,
                         onValueChange = { code = it },
@@ -1252,8 +1424,12 @@ private fun EditPendingProductDialog(
                         singleLine = true,
                         colors = fieldColors,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f).testTag("assistant_edit_code")
+                        modifier = mod
+                            .bringIntoViewOnFocus()
+                            .testTag("assistant_edit_code")
                     )
+                },
+                second = { mod ->
                     OutlinedTextField(
                         value = category,
                         onValueChange = { category = it },
@@ -1261,12 +1437,15 @@ private fun EditPendingProductDialog(
                         singleLine = true,
                         colors = fieldColors,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = mod.bringIntoViewOnFocus()
                     )
                 }
+            )
 
-                if (!isRecipe) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!isRecipe) {
+                ResponsivePair(
+                    breakpoint = 340.dp,
+                    first = { mod ->
                         OutlinedTextField(
                             value = stockStr,
                             onValueChange = { stockStr = it },
@@ -1275,8 +1454,10 @@ private fun EditPendingProductDialog(
                             singleLine = true,
                             colors = fieldColors,
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
+                            modifier = mod.bringIntoViewOnFocus()
                         )
+                    },
+                    second = { mod ->
                         OutlinedTextField(
                             value = costStr,
                             onValueChange = { newCostStr ->
@@ -1295,11 +1476,16 @@ private fun EditPendingProductDialog(
                             singleLine = true,
                             colors = fieldColors,
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f).testTag("assistant_edit_cost")
+                            modifier = mod
+                                .bringIntoViewOnFocus()
+                                .testTag("assistant_edit_cost")
                         )
                     }
+                )
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ResponsivePair(
+                    breakpoint = 340.dp,
+                    first = { mod ->
                         OutlinedTextField(
                             value = profitPctStr,
                             onValueChange = { newPct ->
@@ -1317,8 +1503,12 @@ private fun EditPendingProductDialog(
                             singleLine = true,
                             colors = fieldColors,
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f).testTag("assistant_edit_profit_pct")
+                            modifier = mod
+                                .bringIntoViewOnFocus()
+                                .testTag("assistant_edit_profit_pct")
                         )
+                    },
+                    second = { mod ->
                         OutlinedTextField(
                             value = priceStr,
                             onValueChange = { newSale ->
@@ -1335,130 +1525,144 @@ private fun EditPendingProductDialog(
                             singleLine = true,
                             colors = fieldColors,
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f).testTag("assistant_edit_sale_price")
+                            modifier = mod
+                                .bringIntoViewOnFocus()
+                                .testTag("assistant_edit_sale_price")
                         )
                     }
+                )
 
-                    // Quick Margin Chips
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (configuredMinProfitPercent != null && configuredMinProfitPercent > 0.0) {
-                            item {
-                                FilterChip(
-                                    selected = kotlin.math.abs(profitPctVal - configuredMinProfitPercent) < 0.1,
-                                    onClick = { applyProfitPercent(configuredMinProfitPercent) },
-                                    enabled = costVal > 0.0,
-                                    label = { Text("+${configuredMinProfitPercent.toInt()}% (Mín.)", fontSize = 11.sp) }
-                                )
-                            }
-                        }
-                        items(listOf(20, 30, 40, 50, 100)) { pct ->
-                            FilterChip(
-                                selected = kotlin.math.abs(profitPctVal - pct) < 0.1,
-                                onClick = { applyProfitPercent(pct.toDouble()) },
-                                enabled = costVal > 0.0,
-                                label = { Text("+$pct%", fontSize = 11.sp) }
-                            )
-                        }
+                // Quick Margin Chips
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (configuredMinProfitPercent != null && configuredMinProfitPercent > 0.0) {
+                        FilterChip(
+                            selected = kotlin.math.abs(profitPctVal - configuredMinProfitPercent) < 0.1,
+                            onClick = { applyProfitPercent(configuredMinProfitPercent) },
+                            enabled = costVal > 0.0,
+                            label = { Text("+${configuredMinProfitPercent.toInt()}% (Mín.)", fontSize = 11.sp) }
+                        )
                     }
-                } else {
-                    OutlinedTextField(
-                        value = priceStr,
-                        onValueChange = { priceStr = it; errorMsg = "" },
-                        label = { Text("Precio Venta ($) *") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        colors = fieldColors,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().testTag("assistant_edit_sale_price")
-                    )
+                    listOf(20, 30, 40, 50, 100).forEach { pct ->
+                        FilterChip(
+                            selected = kotlin.math.abs(profitPctVal - pct) < 0.1,
+                            onClick = { applyProfitPercent(pct.toDouble()) },
+                            enabled = costVal > 0.0,
+                            label = { Text("+$pct%", fontSize = 11.sp) }
+                        )
+                    }
                 }
-
-                // Wholesale Price Field
+            } else {
                 OutlinedTextField(
-                    value = wholesaleStr,
-                    onValueChange = { wholesaleStr = it },
-                    label = { Text("Precio al Mayor ($) (Opcional)") },
-                    placeholder = { Text("Ej. 10.50") },
-                    leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null, tint = Color(0xFF94A3B8)) },
+                    value = priceStr,
+                    onValueChange = { priceStr = it; errorMsg = "" },
+                    label = { Text("Precio Venta ($) *") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
                     colors = fieldColors,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("assistant_edit_wholesale_price")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .bringIntoViewOnFocus()
+                        .testTag("assistant_edit_sale_price")
                 )
+            }
 
-                // Live summary preview
-                if (saleVal > 0.0) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF1E293B),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // Wholesale Price Field
+            OutlinedTextField(
+                value = wholesaleStr,
+                onValueChange = { wholesaleStr = it },
+                label = { Text("Precio al Mayor ($) (Opcional)") },
+                placeholder = { Text("Ej. 10.50") },
+                leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null, tint = Color(0xFF94A3B8)) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true,
+                colors = fieldColors,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewOnFocus()
+                    .testTag("assistant_edit_wholesale_price")
+            )
+
+            // Live summary preview
+            if (saleVal > 0.0) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF1E293B),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "Venta: \$${String.format(Locale.US, "%.2f", saleVal)} • Bs. ${String.format(Locale.US, "%.2f", saleVal * bcvRate)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF34D399)
+                        )
+                        if (!isRecipe && costVal > 0.0) {
+                            val unitGain = saleVal - costVal
                             Text(
-                                "Venta: \$${String.format(Locale.US, "%.2f", saleVal)} • Bs. ${String.format(Locale.US, "%.2f", saleVal * bcvRate)}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF34D399)
+                                "Ganancia unitaria: +\$${String.format(Locale.US, "%.2f", unitGain)} (${String.format(Locale.US, "%.1f", profitPctVal)}%)",
+                                fontSize = 11.sp,
+                                color = Color(0xFF93C5FD)
                             )
-                            if (!isRecipe && costVal > 0.0) {
-                                val unitGain = saleVal - costVal
-                                Text(
-                                    "Ganancia unitaria: +\$${String.format(Locale.US, "%.2f", unitGain)} (${String.format(Locale.US, "%.1f", profitPctVal)}%)",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF93C5FD)
-                                )
-                            }
-                            if (wholesaleVal > 0.0) {
-                                Text(
-                                    "Al Mayor: \$${String.format(Locale.US, "%.2f", wholesaleVal)} • Bs. ${String.format(Locale.US, "%.2f", wholesaleVal * bcvRate)}",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF38BDF8)
-                                )
-                            }
+                        }
+                        if (wholesaleVal > 0.0) {
+                            Text(
+                                "Al Mayor: \$${String.format(Locale.US, "%.2f", wholesaleVal)} • Bs. ${String.format(Locale.US, "%.2f", wholesaleVal * bcvRate)}",
+                                fontSize = 11.sp,
+                                color = Color(0xFF38BDF8)
+                            )
                         }
                     }
                 }
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+            ResponsivePair(
+                breakpoint = 320.dp,
+                first = { mod ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
+                        modifier = mod
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable { isTaxExempt = !isTaxExempt }
                     ) {
                         Checkbox(checked = isTaxExempt, onCheckedChange = { isTaxExempt = it })
                         Text("Exento IVA", fontSize = 12.sp, color = Color(0xFFE2E8F0))
                     }
+                },
+                second = { mod ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
+                        modifier = mod
+                            .defaultMinSize(minHeight = 48.dp)
                             .clickable { isRecipe = !isRecipe }
                     ) {
                         Checkbox(checked = isRecipe, onCheckedChange = { isRecipe = it })
                         Text("Receta/Servicio", fontSize = 12.sp, color = Color(0xFFE2E8F0))
                     }
                 }
+            )
 
-                if (errorMsg.isNotBlank()) {
-                    Text(errorMsg, color = Color(0xFFF87171), fontSize = 12.sp)
-                }
+            if (errorMsg.isNotBlank()) {
+                Text(errorMsg, color = Color(0xFFF87171), fontSize = 12.sp)
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+            ResponsivePair(
+                breakpoint = 320.dp,
+                first = { mod ->
                     OutlinedButton(
                         onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
+                        modifier = mod.defaultMinSize(minHeight = 48.dp),
                         shape = RoundedCornerShape(10.dp)
                     ) {
                         Text("Cancelar", color = Color(0xFF94A3B8))
                     }
+                },
+                second = { mod ->
                     Button(
                         onClick = {
                             val cleanName = name.trim()
@@ -1489,8 +1693,8 @@ private fun EditPendingProductDialog(
                                 )
                             )
                         },
-                        modifier = Modifier
-                            .weight(1f)
+                        modifier = mod
+                            .defaultMinSize(minHeight = 48.dp)
                             .testTag("assistant_save_edited_product_button"),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
@@ -1498,7 +1702,7 @@ private fun EditPendingProductDialog(
                         Text("Aplicar Cambios", fontWeight = FontWeight.Bold)
                     }
                 }
-            }
+            )
         }
     }
 }
@@ -1537,6 +1741,7 @@ private fun CreateQuoteConfirmationCard(
                 onClick = onModifyClick,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
                     .testTag("assistant_quote_modify_button"),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF38BDF8)),
@@ -1547,35 +1752,38 @@ private fun CreateQuoteConfirmationCard(
                 Text("Modificar Cliente / Validez / Descuento", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onConfirm,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("assistant_quote_confirm_button"),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-                ) {
-                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Generar Ticket", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            ResponsivePair(
+                breakpoint = 300.dp,
+                horizontalSpacing = 8.dp,
+                verticalSpacing = 8.dp,
+                first = { mod ->
+                    Button(
+                        onClick = onConfirm,
+                        modifier = mod
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("assistant_quote_confirm_button"),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                    ) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Generar Ticket", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
+                second = { mod ->
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = mod.defaultMinSize(minHeight = 48.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                        border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Cancelar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                    border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
-                ) {
-                    Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Cancelar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
+            )
         }
     }
 }
@@ -1611,48 +1819,57 @@ private fun EditPendingQuoteDialog(
         ConversationalAssistantEngine.calculateQuoteTotals(items, disc, bcvRate)
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = Color(0xFF0F172A),
-            border = BorderStroke(1.dp, Color(0xFF334155)),
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 560.dp,
+        shape = RoundedCornerShape(20.dp),
+        containerColor = Color(0xFF0F172A),
+        border = BorderStroke(1.dp, Color(0xFF334155))
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 12.dp)
+                .padding(18.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(18.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Editar Presupuesto",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color(0xFF94A3B8))
-                    }
-                }
-
-                OutlinedTextField(
-                    value = customerName,
-                    onValueChange = { customerName = it },
-                    label = { Text("Cliente") },
-                    singleLine = true,
-                    colors = fieldColors,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    "Editar Presupuesto",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color(0xFF94A3B8))
+                }
+            }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = customerName,
+                onValueChange = { customerName = it },
+                label = { Text("Cliente") },
+                singleLine = true,
+                colors = fieldColors,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewOnFocus()
+            )
+
+            ResponsivePair(
+                breakpoint = 340.dp,
+                first = { mod ->
                     OutlinedTextField(
                         value = customerDocument,
                         onValueChange = { customerDocument = it },
@@ -1660,8 +1877,10 @@ private fun EditPendingQuoteDialog(
                         singleLine = true,
                         colors = fieldColors,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = mod.bringIntoViewOnFocus()
                     )
+                },
+                second = { mod ->
                     OutlinedTextField(
                         value = customerPhone,
                         onValueChange = { customerPhone = it },
@@ -1670,11 +1889,14 @@ private fun EditPendingQuoteDialog(
                         singleLine = true,
                         colors = fieldColors,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = mod.bringIntoViewOnFocus()
                     )
                 }
+            )
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ResponsivePair(
+                breakpoint = 340.dp,
+                first = { mod ->
                     OutlinedTextField(
                         value = validityStr,
                         onValueChange = { validityStr = it },
@@ -1683,8 +1905,10 @@ private fun EditPendingQuoteDialog(
                         singleLine = true,
                         colors = fieldColors,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = mod.bringIntoViewOnFocus()
                     )
+                },
+                second = { mod ->
                     OutlinedTextField(
                         value = discountStr,
                         onValueChange = { discountStr = it },
@@ -1693,33 +1917,37 @@ private fun EditPendingQuoteDialog(
                         singleLine = true,
                         colors = fieldColors,
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = mod.bringIntoViewOnFocus()
                     )
                 }
+            )
 
-                Text("Productos incluidos:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF93C5FD))
-                items.forEachIndexed { idx, item ->
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = Color(0xFF1E293B),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
+            Text("Productos incluidos:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF93C5FD))
+            items.forEachIndexed { idx, item ->
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF1E293B),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ResponsiveActionRow(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        breakpoint = 340.dp,
+                        verticalSpacing = 6.dp,
+                        stackedActionAlignment = Alignment.End,
+                        content = {
+                            Column {
                                 Text(item.productName, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
                                 Text("$${"%.2f".format(Locale.US, item.priceUsd)} c/u", color = Color(0xFF94A3B8), fontSize = 11.sp)
                             }
+                        },
+                        action = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 IconButton(
                                     onClick = {
                                         val nextQty = (item.quantity - 1.0).coerceAtLeast(1.0)
                                         items = items.toMutableList().apply { set(idx, item.copy(quantity = nextQty)) }
                                     },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
                                 ) {
                                     Icon(Icons.Filled.Remove, contentDescription = "Restar", tint = Color.White, modifier = Modifier.size(16.dp))
                                 }
@@ -1733,7 +1961,7 @@ private fun EditPendingQuoteDialog(
                                     onClick = {
                                         items = items.toMutableList().apply { set(idx, item.copy(quantity = item.quantity + 1.0)) }
                                     },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
                                 ) {
                                     Icon(Icons.Filled.Add, contentDescription = "Sumar", tint = Color.White, modifier = Modifier.size(16.dp))
                                 }
@@ -1742,43 +1970,53 @@ private fun EditPendingQuoteDialog(
                                         onClick = {
                                             items = items.toMutableList().apply { removeAt(idx) }
                                         },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.defaultMinSize(minWidth = 40.dp, minHeight = 40.dp)
                                     ) {
                                         Icon(Icons.Filled.Delete, contentDescription = "Quitar", tint = Color(0xFFF87171), modifier = Modifier.size(16.dp))
                                     }
                                 }
                             }
                         }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = notes,
-                    onValueChange = { notes = it },
-                    label = { Text("Notas / Condiciones") },
-                    colors = fieldColors,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFF064E3B),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Total Estimado: $${"%.2f".format(Locale.US, liveTotals.totalUsd)} USD • Bs. ${"%.2f".format(Locale.US, liveTotals.totalBs)}",
-                        color = Color(0xFF6EE7B7),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(10.dp)
                     )
                 }
+            }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = it },
+                label = { Text("Notas / Condiciones") },
+                colors = fieldColors,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewOnFocus()
+            )
+
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF064E3B),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Total Estimado: $${"%.2f".format(Locale.US, liveTotals.totalUsd)} USD • Bs. ${"%.2f".format(Locale.US, liveTotals.totalBs)}",
+                    color = Color(0xFF6EE7B7),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
+
+            ResponsivePair(
+                breakpoint = 320.dp,
+                first = { mod ->
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = mod.defaultMinSize(minHeight = 48.dp)
+                    ) {
                         Text("Cancelar", color = Color(0xFF94A3B8))
                     }
+                },
+                second = { mod ->
                     Button(
                         onClick = {
                             onSave(
@@ -1793,13 +2031,13 @@ private fun EditPendingQuoteDialog(
                                 )
                             )
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = mod.defaultMinSize(minHeight = 48.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                     ) {
                         Text("Aplicar Cambios", fontWeight = FontWeight.Bold)
                     }
                 }
-            }
+            )
         }
     }
 }
@@ -1837,33 +2075,36 @@ private fun ConfirmationButtonsCard(
                 )
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onConfirm,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
-                ) {
-                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Sí, Confirmar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            ResponsivePair(
+                breakpoint = 300.dp,
+                horizontalSpacing = 8.dp,
+                verticalSpacing = 8.dp,
+                first = { mod ->
+                    Button(
+                        onClick = onConfirm,
+                        modifier = mod.defaultMinSize(minHeight = 48.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669))
+                    ) {
+                        Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Sí, Confirmar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                },
+                second = { mod ->
+                    OutlinedButton(
+                        onClick = onCancel,
+                        modifier = mod.defaultMinSize(minHeight = 48.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                        border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("No, Cancelar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-
-                OutlinedButton(
-                    onClick = onCancel,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
-                    border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
-                ) {
-                    Icon(Icons.Filled.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("No, Cancelar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
+            )
         }
     }
 }
@@ -1998,5 +2239,196 @@ private fun SuggestionChip(
             fontWeight = FontWeight.Medium,
             color = Color(0xFFE2E8F0)
         )
+    }
+}
+
+@Composable
+private fun AssistantCapabilitiesDialog(
+    modelLabel: String,
+    onDismiss: () -> Unit,
+    onTryCommand: (String) -> Unit
+) {
+    val sections = listOf(
+        Triple(
+            "🧾 Facturas y Seguimiento por Fecha",
+            Color(0xFF38BDF8),
+            listOf(
+                "Última factura" to "Detalle de la última factura",
+                "Facturas de hoy / ayer / semana / mes" to "Resumen de facturas de hoy",
+                "Por fecha o rango: \"Facturas del 01/11 al 15/11\"" to "Resumen de facturas de este mes",
+                "Seguimiento: después de listar facturas, di \"muéstrame la 2\", \"la primera\" o \"la de María\"" to null,
+                "Por número: \"Consulta la factura #45\"" to null
+            )
+        ),
+        Triple(
+            "📦 Inventario, OCR de Facturas y Precios",
+            Color(0xFF34D399),
+            listOf(
+                "Escanear factura por foto/cámara (OCR): extrae productos, costos, proveedor y suma inventario" to "__OPEN_INVOICE_OCR__",
+                "Valorización: capital invertido vs valor de venta" to "Valor del inventario",
+                "Bajo stock o agotados" to "¿Cuáles productos tienen bajo stock?",
+                "Buscar precio y existencias de un producto" to null,
+                "Cambiar precio rápido: \"Cambia el precio de [producto] a $5.50\"" to null,
+                "Crear producto nuevo, sumar existencias o cargar CSV" to null
+            )
+        ),
+        Triple(
+            "💳 Cashea, Créditos, Gastos y Tasa BCV",
+            Color(0xFFA78BFA),
+            listOf(
+                "Estado Cashea: vendido, pagado, deuda pendiente y comisiones" to "Resumen de Cashea",
+                "Cuentas por cobrar / clientes con deuda" to "Cuentas por cobrar",
+                "Resumen de gastos de hoy o del mes" to "Resumen de gastos de hoy",
+                "Registrar gasto: \"Registrar gasto de $25 por internet\"" to null,
+                "Consultar o actualizar la tasa BCV" to "¿Cuál es la tasa oficial del BCV hoy?"
+            )
+        ),
+        Triple(
+            "📋 Presupuestos, Clientes y Navegación",
+            Color(0xFFFBBF24),
+            listOf(
+                "Armar presupuesto con productos reales, WhatsApp y descuento" to null,
+                "Registrar o buscar clientes y facturas de proveedores" to null,
+                "Interruptor LIVE: conversación por voz en tiempo real sin pausas" to null,
+                "Navegar: \"Ir a facturación / inventario / cashea / resumen / ajustes\"" to null
+            )
+        )
+    )
+
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 560.dp,
+        shape = RoundedCornerShape(22.dp),
+        containerColor = Color(0xFF0F172A),
+        border = BorderStroke(1.dp, Color(0xFF334155)),
+        modifier = Modifier
+            .heightIn(max = 640.dp)
+            .testTag("assistant_capabilities_dialog")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = Color(0xFF818CF8),
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Column {
+                        Text(
+                            "Funciones del Asistente",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "Motor activo: $modelLabel",
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color(0xFF94A3B8))
+                }
+            }
+
+            HorizontalDivider(color = Color(0xFF1E293B))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                sections.forEach { (title, accentColor, items) ->
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF1E293B).copy(alpha = 0.75f),
+                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = title,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = accentColor
+                            )
+                            items.forEach { (label, quickCmd) ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(
+                                            if (quickCmd != null) {
+                                                Modifier
+                                                    .defaultMinSize(minHeight = 48.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color(0xFF0F172A).copy(alpha = 0.6f))
+                                                    .clickable { onTryCommand(quickCmd) }
+                                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                                            } else {
+                                                Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            }
+                                        ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "• $label",
+                                        fontSize = 11.5.sp,
+                                        color = Color(0xFFE2E8F0),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (quickCmd != null) {
+                                        Text(
+                                            text = "Probar",
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = accentColor,
+                                            modifier = Modifier.padding(start = 8.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+            ) {
+                Text("Entendido", fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }

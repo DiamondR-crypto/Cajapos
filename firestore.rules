@@ -260,6 +260,21 @@ service cloud.firestore {
              data.lastActiveAt is timestamp && data.lastActiveAt <= request.time;
     }
 
+    function isValidEncryptedBackup(data) {
+      return data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+             data.googleEmail is string && data.googleEmail.size() <= 200 &&
+             data.storeName is string && data.storeName.size() <= 120 &&
+             data.storeRif is string && data.storeRif.size() <= 40 &&
+             data.deviceId is string && data.deviceId.size() <= 128 &&
+             data.deviceModel is string && data.deviceModel.size() <= 120 &&
+             data.formatVersion is int && data.formatVersion >= 1 && data.formatVersion <= 10 &&
+             data.productsCount is int && data.productsCount >= 0 &&
+             data.salesCount is int && data.salesCount >= 0 &&
+             data.customersCount is int && data.customersCount >= 0 &&
+             data.exportedAtMs is int && data.exportedAtMs >= 0 &&
+             data.encryptedPayload is string && data.encryptedPayload.size() > 0 && data.encryptedPayload.size() <= 950000;
+    }
+
     // --- USER ACCOUNT ROOT & ISOLATED BUSINESS SUBCOLLECTIONS ---
     match /users/{userId} {
       allow get, list: if isOwner(userId);
@@ -717,6 +732,41 @@ service cloud.firestore {
                          incoming().diff(existing()).affectedKeys().hasOnly(['deviceModel', 'googleEmail', 'lastActiveAt', 'updatedAt']);
 
         allow delete: if isOwner(userId) && isValidId(deviceId);
+      }
+
+      // 15. Encrypted JSON Cloud Backup (Overwritten every 20 minutes at doc 'latest')
+      match /encrypted_backups/{backupId} {
+        allow get: if isOwner(userId) && isValidId(backupId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(backupId) &&
+                         incoming().userId == request.auth.uid &&
+                         incoming().keys().hasAll([
+                           'userId', 'googleEmail', 'storeName', 'storeRif', 'deviceId', 'deviceModel',
+                           'formatVersion', 'productsCount', 'salesCount', 'customersCount',
+                           'exportedAtMs', 'encryptedPayload', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'googleEmail', 'storeName', 'storeRif', 'deviceId', 'deviceModel',
+                           'formatVersion', 'productsCount', 'salesCount', 'customersCount',
+                           'exportedAtMs', 'encryptedPayload', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidServerTimestampsOnCreate(incoming()) &&
+                         isValidEncryptedBackup(incoming());
+
+        allow update: if isOwner(userId) &&
+                         isValidId(backupId) &&
+                         isValidEncryptedBackup(incoming()) &&
+                         incoming().userId == existing().userId &&
+                         isValidServerTimestampsOnUpdate(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'googleEmail', 'storeName', 'storeRif', 'deviceId', 'deviceModel',
+                           'formatVersion', 'productsCount', 'salesCount', 'customersCount',
+                           'exportedAtMs', 'encryptedPayload', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(backupId);
       }
     }
   }

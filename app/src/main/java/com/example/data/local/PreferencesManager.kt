@@ -191,6 +191,14 @@ class PreferencesManager(context: Context) {
         get() = prefs.getLong("lastPartialBackupTimestamp", 0L)
         set(value) = prefs.edit().putLong("lastPartialBackupTimestamp", value).apply()
 
+    var lastFirebaseEncryptedBackupTimestamp: Long
+        get() = prefs.getLong("lastFirebaseEncryptedBackupTimestamp", 0L)
+        set(value) = prefs.edit().putLong("lastFirebaseEncryptedBackupTimestamp", value).apply()
+
+    var lastFirebaseEncryptedBackupSummary: String
+        get() = prefs.getString("lastFirebaseEncryptedBackupSummary", "") ?: ""
+        set(value) = prefs.edit().putString("lastFirebaseEncryptedBackupSummary", value).apply()
+
     var isForceLiveStreaming: Boolean
         get() = prefs.getBoolean("isForceLiveStreaming", true)
         set(value) = prefs.edit().putBoolean("isForceLiveStreaming", value).apply()
@@ -205,7 +213,14 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putString("geminiCustomApiKey", value).apply()
 
     var geminiSelectedModel: String
-        get() = prefs.getString("geminiSelectedModel", "gemini-3.5-flash") ?: "gemini-3.5-flash"
+        get() {
+            val saved = prefs.getString("geminiSelectedModel", "gemini-3.5-flash-lite") ?: "gemini-3.5-flash-lite"
+            return if (saved == "gemini-3.5-flash" || saved == "gemini-2.5-flash" || saved.isBlank()) {
+                "gemini-3.5-flash-lite"
+            } else {
+                saved
+            }
+        }
         set(value) = prefs.edit().putString("geminiSelectedModel", value).apply()
 
     // --- SUPABASE / CLOUD NETWORK CREDENTIALS ---

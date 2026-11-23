@@ -22,7 +22,6 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.PosViewModel
 import com.example.utils.GoogleSignInHelper
@@ -67,65 +66,67 @@ fun LicenseDialog(
     var invLimitText by remember(customDailyInvoiceLimit) { mutableStateOf(customDailyInvoiceLimit.toString()) }
     var errorMessage by remember { mutableStateOf("") }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 560.dp,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 8.dp
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp)
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Header
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isLicensed) Color(0xFF059669).copy(alpha = 0.15f) else Color(0xFFD97706).copy(alpha = 0.15f),
+                        modifier = Modifier.size(44.dp)
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isLicensed) Color(0xFF059669).copy(alpha = 0.15f) else Color(0xFFD97706).copy(alpha = 0.15f),
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    if (isLicensed) Icons.Filled.VerifiedUser else Icons.Filled.KeyOff,
-                                    contentDescription = null,
-                                    tint = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
-                                )
-                            }
-                        }
-                        Column {
-                            Text(
-                                "Gestión de Licencia",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                if (isLicensed) {
-                                    if (isFullTimeLicense || viewModel.isMasterKey(licenseKey)) "🌟 Licencia de Tiempo Completo Activa"
-                                    else "Licencia Administrador Activa"
-                                } else "Versión sin Licencia (Límites activos)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706),
-                                fontWeight = FontWeight.SemiBold
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                if (isLicensed) Icons.Filled.VerifiedUser else Icons.Filled.KeyOff,
+                                contentDescription = null,
+                                tint = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
                             )
                         }
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                    Column {
+                        Text(
+                            "Gestión de Licencia",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            if (isLicensed) {
+                                if (isFullTimeLicense || viewModel.isMasterKey(licenseKey)) "🌟 Licencia de Tiempo Completo Activa"
+                                else "Licencia Administrador Activa"
+                            } else "Versión sin Licencia (Límites activos)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706),
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                }
+            }
 
                 // Current Status Summary Card
                 Card(
@@ -215,39 +216,45 @@ fun LicenseDialog(
                             }
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.Filled.Inventory2, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Text("Inventario Registrado:", style = MaterialTheme.typography.bodyMedium)
+                        ResponsiveActionRow(
+                            breakpoint = 360.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(Icons.Filled.Inventory2, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Text("Inventario Registrado:", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            },
+                            action = {
+                                Text(
+                                    "${allProducts.size} / ${if (!isLicensed) "10 máx." else if (isUnlimitedInventory) "Ilimitado" else "$customProductLimit máx."}",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (!isLicensed && allProducts.size >= 10) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                )
                             }
-                            Text(
-                                "${allProducts.size} / ${if (!isLicensed) "10 máx." else if (isUnlimitedInventory) "Ilimitado" else "$customProductLimit máx."}",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (!isLicensed && allProducts.size >= 10) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
+                        )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Text("Facturas Emitidas Hoy:", style = MaterialTheme.typography.bodyMedium)
+                        ResponsiveActionRow(
+                            breakpoint = 360.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(Icons.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Text("Facturas Emitidas Hoy:", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            },
+                            action = {
+                                Text(
+                                    "$todaySalesCount / ${if (!isLicensed) "5 máx." else if (isUnlimitedDailyInvoices) "Ilimitadas" else "$customDailyInvoiceLimit máx."}",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (!isLicensed && todaySalesCount >= 5) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                )
                             }
-                            Text(
-                                "$todaySalesCount / ${if (!isLicensed) "5 máx." else if (isUnlimitedDailyInvoices) "Ilimitadas" else "$customDailyInvoiceLimit máx."}",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (!isLicensed && todaySalesCount >= 5) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
+                        )
 
                         if (!isLicensed) {
                             Text(
@@ -290,7 +297,7 @@ fun LicenseDialog(
                         }
                     },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                     shape = RoundedCornerShape(12.dp)
                 )
 
@@ -407,7 +414,7 @@ fun LicenseDialog(
                                     onValueChange = { prodLimitText = it.filter { ch -> ch.isDigit() } },
                                     label = { Text("Límite de productos en inventario") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                                     shape = RoundedCornerShape(10.dp)
                                 )
                             }
@@ -445,7 +452,7 @@ fun LicenseDialog(
                                     onValueChange = { invLimitText = it.filter { ch -> ch.isDigit() } },
                                     label = { Text("Límite de facturas por día") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                                     shape = RoundedCornerShape(10.dp)
                                 )
                             }
@@ -453,47 +460,49 @@ fun LicenseDialog(
                     }
 
                     // Save Limits and Deactivate Buttons
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                val pLimit = prodLimitText.toIntOrNull() ?: 50
-                                val iLimit = invLimitText.toIntOrNull() ?: 30
-                                viewModel.updateLicenseLimits(
-                                    unlimitedInventory = unlimitedInv,
-                                    productLimit = pLimit,
-                                    unlimitedInvoices = unlimitedInvoices,
-                                    invoiceLimit = iLimit
-                                )
-                                Toast.makeText(context, "Límites de licencia actualizados", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Filled.Save, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Guardar Cambios")
+                    ResponsivePair(
+                        breakpoint = 380.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 10.dp,
+                        first = { mod ->
+                            Button(
+                                onClick = {
+                                    val pLimit = prodLimitText.toIntOrNull() ?: 50
+                                    val iLimit = invLimitText.toIntOrNull() ?: 30
+                                    viewModel.updateLicenseLimits(
+                                        unlimitedInventory = unlimitedInv,
+                                        productLimit = pLimit,
+                                        unlimitedInvoices = unlimitedInvoices,
+                                        invoiceLimit = iLimit
+                                    )
+                                    Toast.makeText(context, "Límites de licencia actualizados", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Filled.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Guardar Cambios")
+                            }
+                        },
+                        second = { mod ->
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.deactivateLicense()
+                                    keyInput = ""
+                                    Toast.makeText(context, "Licencia desactivada", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Quitar")
+                            }
                         }
-
-                        OutlinedButton(
-                            onClick = {
-                                viewModel.deactivateLicense()
-                                keyInput = ""
-                                Toast.makeText(context, "Licencia desactivada", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                        ) {
-                            Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Quitar")
-                        }
-                    }
+                    )
                 }
             }
         }
-    }
 }

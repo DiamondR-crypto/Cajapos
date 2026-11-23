@@ -30,7 +30,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.Customer
 import com.example.data.local.Product
@@ -38,7 +37,12 @@ import com.example.data.local.Quote
 import com.example.data.local.QuoteItem
 import com.example.ui.CartItem
 import com.example.ui.PosViewModel
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.KeyboardAwareDialog
 import com.example.ui.components.QuoteTicketDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.ResponsivePair
+import com.example.ui.components.bringIntoViewOnFocus
 import com.example.ui.pos.CustomerSelectorCard
 import com.example.ui.pos.EditCartItemDialog
 import com.example.ui.pos.EditRateDialog
@@ -49,7 +53,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun QuotesScreen(
     viewModel: PosViewModel,
@@ -553,9 +557,10 @@ fun QuotesScreen(
                                 border = BorderStroke(1.dp, Color(0xFF1D4ED8).copy(alpha = 0.25f))
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
-                                    Row(
+                                    FlowRow(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.Start),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         Text(
                                             "Base: \$${String.format("%.2f", baseTaxableUsd)}",
@@ -588,31 +593,34 @@ fun QuotesScreen(
                                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
                                     )
 
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            "Total Presupuesto:",
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    ResponsiveActionRow(
+                                        breakpoint = 320.dp,
+                                        verticalSpacing = 4.dp,
+                                        stackedActionAlignment = Alignment.Start,
+                                        content = {
                                             Text(
-                                                "\$${String.format("%.2f", totalUsd)} USD",
+                                                "Total Presupuesto:",
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 17.sp,
-                                                color = Color(0xFF1D4ED8)
+                                                style = MaterialTheme.typography.titleMedium
                                             )
-                                            Text(
-                                                "• Bs. ${String.format("%.2f", totalBs)}",
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 14.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                        },
+                                        action = {
+                                            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Text(
+                                                    "\$${String.format("%.2f", totalUsd)} USD",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 17.sp,
+                                                    color = Color(0xFF1D4ED8)
+                                                )
+                                                Text(
+                                                    "• Bs. ${String.format("%.2f", totalBs)}",
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 14.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
                                         }
-                                    }
+                                    )
 
                                     Button(
                                         onClick = { showCompleteQuoteDialog = true },
@@ -764,75 +772,78 @@ private fun QuoteRateAndModeBar(
     onEditRateClick: () -> Unit,
     onRefreshRateClick: () -> Unit
 ) {
-    Row(
+    ResponsiveActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.clickable { onEditRateClick() }
-        ) {
-            Icon(
-                Icons.Filled.CurrencyExchange,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                "Tasa BCV: Bs. ${String.format("%.2f", bcvRate)}",
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Icon(
-                Icons.Filled.Edit,
-                contentDescription = "Editar tasa",
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                modifier = Modifier.size(14.dp)
-            )
-        }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF1D4ED8).copy(alpha = 0.12f),
-                border = BorderStroke(1.dp, Color(0xFF1D4ED8).copy(alpha = 0.3f))
+        breakpoint = 330.dp,
+        verticalSpacing = 4.dp,
+        stackedActionAlignment = Alignment.Start,
+        content = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.clickable { onEditRateClick() }
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                Icon(
+                    Icons.Filled.CurrencyExchange,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    "Tasa BCV: Bs. ${String.format("%.2f", bcvRate)}",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "Editar tasa",
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        },
+        action = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1D4ED8).copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, Color(0xFF1D4ED8).copy(alpha = 0.3f))
                 ) {
-                    Icon(
-                        Icons.Filled.Description,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = Color(0xFF1D4ED8)
-                    )
-                    Text(
-                        text = "Sin descontar stock",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1D4ED8)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = Color(0xFF1D4ED8)
+                        )
+                        Text(
+                            text = "Sin descontar stock",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1D4ED8)
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = onRefreshRateClick,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Actualizar Tasa", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 }
             }
-
-            IconButton(
-                onClick = onRefreshRateClick,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Actualizar Tasa", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-            }
         }
-    }
+    )
 }
 
 @Composable
@@ -1011,6 +1022,7 @@ private fun QuoteTotalsSection(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CompleteQuoteDialog(
     cart: List<CartItem>,
@@ -1051,16 +1063,15 @@ private fun CompleteQuoteDialog(
     val totalUsd = baseTaxableUsd + baseExemptUsd + ivaUsd
     val totalBs = totalUsd * bcvRate
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 560.dp,
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 8.dp
+    ) {
             Column(
                 modifier = Modifier
-                    .padding(20.dp)
+                    .padding(18.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -1069,7 +1080,11 @@ private fun CompleteQuoteDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Icon(Icons.Filled.RequestQuote, contentDescription = null, tint = Color(0xFF1D4ED8))
                         Text("Completar Presupuesto", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                     }
@@ -1085,63 +1100,77 @@ private fun CompleteQuoteDialog(
                     leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = docInput,
-                        onValueChange = { docInput = it },
-                        label = { Text("CI / RIF") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = phoneInput,
-                        onValueChange = { phoneInput = it },
-                        label = { Text("WhatsApp / Telf.") },
-                        placeholder = { Text("04141234567") },
-                        leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .weight(1.2f)
-                            .testTag("quote_customer_phone_input")
-                    )
-                }
+                ResponsivePair(
+                    breakpoint = 340.dp,
+                    horizontalSpacing = 8.dp,
+                    verticalSpacing = 8.dp,
+                    firstWeight = 1f,
+                    secondWeight = 1.2f,
+                    first = { mod ->
+                        OutlinedTextField(
+                            value = docInput,
+                            onValueChange = { docInput = it },
+                            label = { Text("CI / RIF") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = mod.bringIntoViewOnFocus()
+                        )
+                    },
+                    second = { mod ->
+                        OutlinedTextField(
+                            value = phoneInput,
+                            onValueChange = { phoneInput = it },
+                            label = { Text("WhatsApp / Telf.") },
+                            placeholder = { Text("04141234567") },
+                            leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = mod
+                                .bringIntoViewOnFocus()
+                                .testTag("quote_customer_phone_input")
+                        )
+                    }
+                )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = validityDaysStr,
-                        onValueChange = { validityDaysStr = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Validez (días)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = discountUsdStr,
-                        onValueChange = { discountUsdStr = it },
-                        label = { Text("Descuento ($)") },
-                        placeholder = { Text("0.00") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                ResponsivePair(
+                    breakpoint = 340.dp,
+                    horizontalSpacing = 8.dp,
+                    verticalSpacing = 8.dp,
+                    first = { mod ->
+                        OutlinedTextField(
+                            value = validityDaysStr,
+                            onValueChange = { validityDaysStr = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Validez (días)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = mod.bringIntoViewOnFocus()
+                        )
+                    },
+                    second = { mod ->
+                        OutlinedTextField(
+                            value = discountUsdStr,
+                            onValueChange = { discountUsdStr = it },
+                            label = { Text("Descuento ($)") },
+                            placeholder = { Text("0.00") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = mod.bringIntoViewOnFocus()
+                        )
+                    }
+                )
 
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(listOf(3, 7, 15, 30)) { days ->
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf(3, 7, 15, 30).forEach { days ->
                         SuggestionChip(
                             onClick = { validityDaysStr = days.toString() },
                             label = { Text("$days días", fontSize = 11.sp) }
@@ -1155,7 +1184,7 @@ private fun CompleteQuoteDialog(
                     label = { Text("Observaciones / Condiciones") },
                     maxLines = 2,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
                 Surface(
@@ -1184,15 +1213,17 @@ private fun CompleteQuoteDialog(
                     }
                 }
 
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    ) {
                         Text("Cancelar")
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             onConfirm(
@@ -1206,7 +1237,9 @@ private fun CompleteQuoteDialog(
                         },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                        modifier = Modifier.testTag("confirm_create_quote_button")
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("confirm_create_quote_button")
                     ) {
                         Icon(Icons.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
@@ -1214,7 +1247,6 @@ private fun CompleteQuoteDialog(
                     }
                 }
             }
-        }
     }
 }
 
@@ -1385,47 +1417,50 @@ private fun SavedQuotesHistorySection(
 
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
 
-                            Row(
+                            ResponsiveActionRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TextButton(
-                                    onClick = { onViewQuote(quote) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Ticket / WhatsApp", fontSize = 12.sp)
-                                }
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    if (quote.status != "ANULADO" && quote.status != "FACTURADO") {
-                                        TextButton(
-                                            onClick = { onConvertToSale(quote) },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                        ) {
-                                            Icon(Icons.Filled.PointOfSale, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(4.dp))
-                                            Text("Facturar", fontSize = 12.sp)
-                                        }
+                                breakpoint = 320.dp,
+                                verticalSpacing = 6.dp,
+                                stackedActionAlignment = Alignment.End,
+                                content = {
+                                    TextButton(
+                                        onClick = { onViewQuote(quote) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Ticket / WhatsApp", fontSize = 12.sp)
                                     }
-                                    if (quote.status == "VIGENTE") {
+                                },
+                                action = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        if (quote.status != "ANULADO" && quote.status != "FACTURADO") {
+                                            TextButton(
+                                                onClick = { onConvertToSale(quote) },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                            ) {
+                                                Icon(Icons.Filled.PointOfSale, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                                Text("Facturar", fontSize = 12.sp)
+                                            }
+                                        }
+                                        if (quote.status == "VIGENTE") {
+                                            IconButton(
+                                                onClick = { onUpdateStatus(quote, "ACEPTADO") },
+                                                modifier = Modifier.size(34.dp)
+                                            ) {
+                                                Icon(Icons.Filled.CheckCircle, contentDescription = "Marcar Aceptado", tint = Color(0xFF059669), modifier = Modifier.size(18.dp))
+                                            }
+                                        }
                                         IconButton(
-                                            onClick = { onUpdateStatus(quote, "ACEPTADO") },
+                                            onClick = { quoteToDelete = quote },
                                             modifier = Modifier.size(34.dp)
                                         ) {
-                                            Icon(Icons.Filled.CheckCircle, contentDescription = "Marcar Aceptado", tint = Color(0xFF059669), modifier = Modifier.size(18.dp))
+                                            Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                                         }
                                     }
-                                    IconButton(
-                                        onClick = { quoteToDelete = quote },
-                                        modifier = Modifier.size(34.dp)
-                                    ) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-                                    }
                                 }
-                            }
+                            )
                         }
                     }
                 }
@@ -1434,7 +1469,7 @@ private fun SavedQuotesHistorySection(
     }
 
     quoteToDelete?.let { quote ->
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { quoteToDelete = null },
             icon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = { Text("¿Eliminar Presupuesto?", fontWeight = FontWeight.Bold) },

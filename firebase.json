@@ -1,7 +1,7 @@
 {
   "firestore": [
     {
-      "database": "ai-studio-android-cajapos-eb114155-a570-45fb-9f2f-7385db700fe0",
+      "database": "ai-studio-android-cajapos-9575fbef-8e43-46f9-8f4a-798a9b59d5bf",
       "rules": "firestore.rules"
     }
   ],

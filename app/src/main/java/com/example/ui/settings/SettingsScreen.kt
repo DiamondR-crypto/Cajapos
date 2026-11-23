@@ -47,9 +47,14 @@ import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.ResponsivePair
+import com.example.ui.components.bringIntoViewOnFocus
 import java.io.File
 import java.io.FileOutputStream
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(viewModel: PosViewModel) {
     val context = LocalContext.current
@@ -163,6 +168,16 @@ fun SettingsScreen(viewModel: PosViewModel) {
 
     val systemNotifications by viewModel.systemNotifications.collectAsStateWithLifecycle()
     var showNotificationsDialog by remember { mutableStateOf(false) }
+
+    val googleAuthUserEmail by viewModel.googleAuthUserEmail.collectAsStateWithLifecycle()
+    val isGoogleAuthLoading by viewModel.isGoogleAuthLoading.collectAsStateWithLifecycle()
+    val lastFirebaseBackupTimestamp by viewModel.lastFirebaseBackupTimestamp.collectAsStateWithLifecycle()
+    val lastFirebaseBackupSummary by viewModel.lastFirebaseBackupSummary.collectAsStateWithLifecycle()
+    val remoteEncryptedBackupInfo by viewModel.remoteEncryptedBackupInfo.collectAsStateWithLifecycle()
+    val isUploadingFirebaseBackup by viewModel.isUploadingFirebaseBackup.collectAsStateWithLifecycle()
+    val isRestoringFirebaseBackup by viewModel.isRestoringFirebaseBackup.collectAsStateWithLifecycle()
+    var showRestoreGoogleBackupDialog by remember { mutableStateOf(false) }
+    var googleRestoreAppendMode by remember { mutableStateOf(false) }
 
     val database = AppDatabase.getDatabase(context)
     val backupManager = remember { BackupManager(context, database) }
@@ -302,9 +317,10 @@ fun SettingsScreen(viewModel: PosViewModel) {
                     }
                 }
 
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
                         selected = (appTheme == "DARK"),
@@ -321,7 +337,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                         ),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                     )
 
                     FilterChip(
@@ -339,7 +355,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                             selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                         ),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                     )
                 }
             }
@@ -366,75 +382,82 @@ fun SettingsScreen(viewModel: PosViewModel) {
             )
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(
-                            if (isLicensed) Icons.Filled.VerifiedUser else Icons.Filled.LockClock,
-                            contentDescription = null,
-                            tint = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706),
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Column {
-                            Text(
-                                text = if (isLicensed) "Licencia Registrada Activa" else "Versión Sin Licencia (Límites Activos)",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
+                ResponsiveActionRow(
+                    breakpoint = 440.dp,
+                    stackedActionAlignment = Alignment.Start,
+                    content = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Icon(
+                                if (isLicensed) Icons.Filled.VerifiedUser else Icons.Filled.LockClock,
+                                contentDescription = null,
+                                tint = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706),
+                                modifier = Modifier.size(28.dp)
                             )
-                            Text(
-                                text = if (isLicensed) {
-                                    if (licenseExpiryTimestamp > 0L) {
-                                        val expStr = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(licenseExpiryTimestamp))
-                                        "Clave: $licenseKey • Vence: $expStr"
-                                    } else "Clave: $licenseKey"
-                                } else "Máximo 10 productos y 5 facturas al día",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Column {
+                                Text(
+                                    text = if (isLicensed) "Licencia Registrada Activa" else "Versión Sin Licencia (Límites Activos)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
+                                )
+                                Text(
+                                    text = if (isLicensed) {
+                                        if (licenseExpiryTimestamp > 0L) {
+                                            val expStr = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date(licenseExpiryTimestamp))
+                                            "Clave: $licenseKey • Vence: $expStr"
+                                        } else "Clave: $licenseKey"
+                                    } else "Máximo 10 productos y 5 facturas al día",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
+                    action = {
+                        Button(
+                            onClick = { showLicenseDialog = true },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isLicensed) MaterialTheme.colorScheme.primary else Color(0xFFD97706)
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                        ) {
+                            Text(if (isLicensed) "Gestionar" else "Activar Clave")
                         }
                     }
-                    Button(
-                        onClick = { showLicenseDialog = true },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isLicensed) MaterialTheme.colorScheme.primary else Color(0xFFD97706)
-                        ),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text(if (isLicensed) "Gestionar" else "Activar Clave")
-                    }
-                }
+                )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text("Capacidad Inventario:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            if (!isLicensed) "${allProducts.size} / 10 productos (Límite Free)"
-                            else if (isUnlimitedInventory) "Ilimitado (${allProducts.size} cargados)"
-                            else "${allProducts.size} / $customProductLimit productos máx.",
-                            fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                ResponsivePair(
+                    breakpoint = 380.dp,
+                    horizontalSpacing = 12.dp,
+                    verticalSpacing = 8.dp,
+                    first = { mod ->
+                        Column(modifier = mod) {
+                            Text("Capacidad Inventario:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                if (!isLicensed) "${allProducts.size} / 10 productos (Límite Free)"
+                                else if (isUnlimitedInventory) "Ilimitado (${allProducts.size} cargados)"
+                                else "${allProducts.size} / $customProductLimit productos máx.",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    },
+                    second = { mod ->
+                        Column(modifier = mod) {
+                            Text("Tope Facturas Diarias:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                if (!isLicensed) "Máximo 5 por día"
+                                else if (isUnlimitedDailyInvoices) "Ilimitadas"
+                                else "Máx. $customDailyInvoiceLimit por día",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("Tope Facturas Diarias:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            if (!isLicensed) "Máximo 5 por día"
-                            else if (isUnlimitedDailyInvoices) "Ilimitadas"
-                            else "Máx. $customDailyInvoiceLimit por día",
-                            fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
+                )
             }
         }
 
@@ -477,7 +500,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         placeholder = { Text("Ej. Inversiones Comerciales C.A.") },
                         leadingIcon = { Icon(Icons.Filled.Business, contentDescription = null) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -488,7 +511,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         placeholder = { Text("Ej. J-12345678-9") },
                         leadingIcon = { Icon(Icons.Filled.Badge, contentDescription = null) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -499,7 +522,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         placeholder = { Text("Ej. 0414-1234567") },
                         leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -509,7 +532,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         label = { Text("Dirección de la Empresa (Modificable)") },
                         placeholder = { Text("Ej. Av. Bolívar, Local 12") },
                         leadingIcon = { Icon(Icons.Filled.LocationOn, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -606,7 +629,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         leadingIcon = { Icon(Icons.Filled.Business, contentDescription = null) },
                         trailingIcon = { Icon(Icons.Filled.Edit, contentDescription = "Editable") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -617,7 +640,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         leadingIcon = { Icon(Icons.Filled.Badge, contentDescription = null) },
                         trailingIcon = { Icon(Icons.Filled.Edit, contentDescription = "Editable") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -637,7 +660,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null) },
                         trailingIcon = { Icon(Icons.Filled.Edit, contentDescription = "Editable") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -647,7 +670,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         label = { Text("Dirección") },
                         leadingIcon = { Icon(Icons.Filled.LocationOn, contentDescription = null) },
                         trailingIcon = { Icon(Icons.Filled.Edit, contentDescription = "Editable") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -659,7 +682,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         leadingIcon = { Icon(Icons.Filled.PointOfSale, contentDescription = null) },
                         trailingIcon = { Icon(Icons.Filled.Edit, contentDescription = "Editable") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -873,24 +896,25 @@ fun SettingsScreen(viewModel: PosViewModel) {
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .bringIntoViewOnFocus()
                                     .testTag("settings_min_profit_input")
                             )
 
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
                                     "Rápido:",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.align(Alignment.CenterVertically)
                                 )
                                 listOf(15, 20, 30, 40, 50).forEach { pct ->
                                     SuggestionChip(
                                         onClick = { editMinProfitMarginPercentStr = pct.toString() },
-                                        label = { Text("$pct%", fontSize = 11.sp) },
-                                        modifier = Modifier.height(30.dp)
+                                        label = { Text("$pct%", fontSize = 11.sp) }
                                     )
                                 }
                             }
@@ -999,7 +1023,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             )
                         },
                         leadingIcon = { Icon(Icons.Filled.PointOfSale, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -1046,134 +1070,146 @@ fun SettingsScreen(viewModel: PosViewModel) {
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.weight(1f).padding(end = 8.dp)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isPrinterConfigured) Color(0xFF10B981).copy(alpha = 0.15f)
-                                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                                modifier = Modifier.size(48.dp)
+                    ResponsiveActionRow(
+                        breakpoint = 440.dp,
+                        stackedActionAlignment = Alignment.Start,
+                        content = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        when (currentPrinterConnectionType) {
-                                            "USB" -> Icons.Filled.Usb
-                                            "BLUETOOTH_CLASSIC" -> Icons.Filled.Bluetooth
-                                            else -> Icons.Filled.Print
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isPrinterConfigured) Color(0xFF10B981).copy(alpha = 0.15f)
+                                    else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            when (currentPrinterConnectionType) {
+                                                "USB" -> Icons.Filled.Usb
+                                                "BLUETOOTH_CLASSIC" -> Icons.Filled.Bluetooth
+                                                else -> Icons.Filled.Print
+                                            },
+                                            contentDescription = null,
+                                            tint = if (isPrinterConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                }
+                                Column {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isPrinterConfigured)
+                                                currentPrinterName
+                                            else
+                                                "Ninguna impresora configurada",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = if (isPrinterConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (isPrinterConfigured) {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = when (currentPrinterConnectionType) {
+                                                    "USB" -> Color(0xFF3B82F6).copy(alpha = 0.15f)
+                                                    "BLUETOOTH_CLASSIC" -> Color(0xFF8B5CF6).copy(alpha = 0.15f)
+                                                    else -> Color(0xFF10B981).copy(alpha = 0.15f)
+                                                }
+                                            ) {
+                                                Text(
+                                                    when (currentPrinterConnectionType) {
+                                                        "USB" -> "USB OTG"
+                                                        "BLUETOOTH_CLASSIC" -> "BT Clásico"
+                                                        else -> "BLE FunPrint"
+                                                    },
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = when (currentPrinterConnectionType) {
+                                                        "USB" -> Color(0xFF2563EB)
+                                                        "BLUETOOTH_CLASSIC" -> Color(0xFF7C3AED)
+                                                        else -> Color(0xFF059669)
+                                                    },
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Text(
+                                        text = if (isPrinterConfigured) {
+                                            val idStr = if (currentPrinterConnectionType == "USB") "VID: $currentUsbVid" else currentPrinterMac
+                                            "Dispositivo: $idStr • Formato: $currentPrinterPaperWidth"
+                                        } else {
+                                            "Compatible con USB OTG, Bluetooth Clásico (ESC/POS) y Mini BLE (MX06/C9)"
                                         },
-                                        contentDescription = null,
-                                        tint = if (isPrinterConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(28.dp)
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text(
-                                        text = if (isPrinterConfigured)
-                                            currentPrinterName
-                                        else
-                                            "Ninguna impresora configurada",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = if (isPrinterConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (isPrinterConfigured) {
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = when (currentPrinterConnectionType) {
-                                                "USB" -> Color(0xFF3B82F6).copy(alpha = 0.15f)
-                                                "BLUETOOTH_CLASSIC" -> Color(0xFF8B5CF6).copy(alpha = 0.15f)
-                                                else -> Color(0xFF10B981).copy(alpha = 0.15f)
-                                            }
-                                        ) {
-                                            Text(
-                                                when (currentPrinterConnectionType) {
-                                                    "USB" -> "USB OTG"
-                                                    "BLUETOOTH_CLASSIC" -> "BT Clásico"
-                                                    else -> "BLE FunPrint"
-                                                },
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = when (currentPrinterConnectionType) {
-                                                    "USB" -> Color(0xFF2563EB)
-                                                    "BLUETOOTH_CLASSIC" -> Color(0xFF7C3AED)
-                                                    else -> Color(0xFF059669)
-                                                },
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                                Text(
-                                    text = if (isPrinterConfigured) {
-                                        val idStr = if (currentPrinterConnectionType == "USB") "VID: $currentUsbVid" else currentPrinterMac
-                                        "Dispositivo: $idStr • Formato: $currentPrinterPaperWidth"
-                                    } else {
-                                        "Compatible con USB OTG, Bluetooth Clásico (ESC/POS) y Mini BLE (MX06/C9)"
+                        },
+                        action = {
+                            if (isPrinterConfigured) {
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.unlinkPrinter()
+                                        Toast.makeText(context, "Impresora desvinculada del sistema", Toast.LENGTH_SHORT).show()
                                     },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                                ) {
+                                    Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Desvincular")
+                                }
+                            }
+                        }
+                    )
+
+                    // Formato de Papel Térmico rápido
+                    ResponsiveActionRow(
+                        breakpoint = 380.dp,
+                        verticalSpacing = 6.dp,
+                        stackedActionAlignment = Alignment.Start,
+                        content = {
+                            Text(
+                                "Ancho de papel de la factura:",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                        },
+                        action = {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = currentPrinterPaperWidth == "58mm",
+                                    onClick = { viewModel.setPrinterPaperWidth("58mm") },
+                                    label = { Text("58 mm", fontSize = 11.sp) },
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                                )
+                                FilterChip(
+                                    selected = currentPrinterPaperWidth == "80mm",
+                                    onClick = { viewModel.setPrinterPaperWidth("80mm") },
+                                    label = { Text("80 mm", fontSize = 11.sp) },
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                                 )
                             }
                         }
-
-                        if (isPrinterConfigured) {
-                            OutlinedButton(
-                                onClick = {
-                                    viewModel.unlinkPrinter()
-                                    Toast.makeText(context, "Impresora desvinculada del sistema", Toast.LENGTH_SHORT).show()
-                                },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Filled.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Desvincular")
-                            }
-                        }
-                    }
-
-                    // Formato de Papel Térmico rápido
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            "Ancho de papel de la factura:",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium
-                        )
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            FilterChip(
-                                selected = currentPrinterPaperWidth == "58mm",
-                                onClick = { viewModel.setPrinterPaperWidth("58mm") },
-                                label = { Text("58 mm", fontSize = 11.sp) }
-                            )
-                            FilterChip(
-                                selected = currentPrinterPaperWidth == "80mm",
-                                onClick = { viewModel.setPrinterPaperWidth("80mm") },
-                                label = { Text("80 mm", fontSize = 11.sp) }
-                            )
-                        }
-                    }
+                    )
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Button(
                             onClick = { showPrinterScanDialog = true },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Filled.Print, contentDescription = null)
@@ -1182,39 +1218,39 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         }
 
                         if (isPrinterConfigured) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                FilledTonalButton(
-                                    onClick = {
-                                        viewModel.printTestTicket(
-                                            context = context,
-                                            onResult = { success, msg ->
-                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Prueba Térmica")
-                                }
+                            FilledTonalButton(
+                                onClick = {
+                                    viewModel.printTestTicket(
+                                        context = context,
+                                        onResult = { success, msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                },
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Prueba Térmica")
+                            }
 
-                                OutlinedButton(
-                                    onClick = {
-                                        viewModel.printFiscalTestTicket(
-                                            context = context,
-                                            onStatus = { },
-                                            onResult = { success, msg ->
-                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                            }
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(Icons.Filled.AccountBalance, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Prueba Fiscal")
-                                }
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.printFiscalTestTicket(
+                                        context = context,
+                                        onStatus = { },
+                                        onResult = { success, msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                },
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Filled.AccountBalance, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Prueba Fiscal")
                             }
                         }
                     }
@@ -1271,7 +1307,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
-                                if (editApiKey.isNotBlank()) "Modo Personalizado / API Key de Pago" else "Nivel Gratuito: Gemini 3.5 Flash Activo",
+                                if (editApiKey.isNotBlank()) "Modo Personalizado / API Key de Pago" else "Nivel Gratuito: Gemini 3.5 Flash-Lite Activo",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (editApiKey.isNotBlank()) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
                             )
@@ -1295,7 +1331,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = "El asistente está configurado por defecto con Gemini 3.5 Flash en nivel gratuito. Si deseas usar una API Key de Gemini de pago o un modelo de mayor capacidad (como Gemini 3.1 Pro), puedes configurarlo a continuación.",
+                                text = "El asistente usa por defecto Gemini 3.5 Flash-Lite (el modelo gratuito más rápido de baja latencia). También puedes elegir Gemini 3.8 Flash o configurar tu API Key de pago.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -1309,24 +1345,28 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         fontWeight = FontWeight.SemiBold
                     )
 
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         FilterChip(
-                            selected = editModel == "gemini-3.5-flash",
-                            onClick = { editModel = "gemini-3.5-flash" },
-                            label = { Text("3.5 Flash (Gratuito)", fontSize = 11.sp) }
+                            selected = editModel == "gemini-3.5-flash-lite",
+                            onClick = { editModel = "gemini-3.5-flash-lite" },
+                            label = { Text("3.5 Flash-Lite (Más Rápido)", fontSize = 11.5.sp) },
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                        )
+                        FilterChip(
+                            selected = editModel == "gemini-3.8-flash",
+                            onClick = { editModel = "gemini-3.8-flash" },
+                            label = { Text("3.8 Flash (Gratuito)", fontSize = 11.5.sp) },
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                         )
                         FilterChip(
                             selected = editModel == "gemini-3.1-pro-preview",
                             onClick = { editModel = "gemini-3.1-pro-preview" },
-                            label = { Text("3.1 Pro (Avanzado)", fontSize = 11.sp) }
-                        )
-                        FilterChip(
-                            selected = editModel == "gemini-3.1-flash-lite-preview",
-                            onClick = { editModel = "gemini-3.1-flash-lite-preview" },
-                            label = { Text("3.1 Lite (Veloz)", fontSize = 11.sp) }
+                            label = { Text("3.1 Pro (Avanzado)", fontSize = 11.5.sp) },
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                         )
                     }
 
@@ -1340,7 +1380,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         supportingText = {
                             Text("Clave de Google AI Studio / Google Cloud Vertex.")
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp),
                         singleLine = true
                     )
@@ -1424,48 +1464,263 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                isTestingGemini = true
-                                geminiTestResult = null
-                                viewModel.testGeminiConnection(editApiKey, editModel) { success, msg ->
-                                    isTestingGemini = false
-                                    geminiTestSuccess = success
-                                    geminiTestResult = msg
+                    ResponsivePair(
+                        breakpoint = 400.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 10.dp,
+                        first = { mod ->
+                            OutlinedButton(
+                                onClick = {
+                                    isTestingGemini = true
+                                    geminiTestResult = null
+                                    viewModel.testGeminiConnection(editApiKey, editModel) { success, msg ->
+                                        isTestingGemini = false
+                                        geminiTestSuccess = success
+                                        geminiTestResult = msg
+                                    }
+                                },
+                                enabled = !isTestingGemini,
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                if (isTestingGemini) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Probando...")
+                                } else {
+                                    Icon(Icons.Filled.NetworkCheck, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Probar Conexión")
                                 }
-                            },
-                            enabled = !isTestingGemini,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            if (isTestingGemini) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            }
+                        },
+                        second = { mod ->
+                            Button(
+                                onClick = {
+                                    viewModel.setGeminiCustomApiKey(editApiKey)
+                                    viewModel.setGeminiSelectedModel(editModel)
+                                    Toast.makeText(context, "Configuración de Gemini guardada", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                            ) {
+                                Icon(Icons.Filled.Save, contentDescription = null)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Probando...")
-                            } else {
-                                Icon(Icons.Filled.NetworkCheck, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Probar Conexión")
+                                Text("Guardar Cambios")
                             }
                         }
+                    )
+                }
+            }
+        }
 
-                        Button(
-                            onClick = {
-                                viewModel.setGeminiCustomApiKey(editApiKey)
-                                viewModel.setGeminiSelectedModel(editModel)
-                                Toast.makeText(context, "Configuración de Gemini guardada", Toast.LENGTH_SHORT).show()
+        // --- GOOGLE FIREBASE ENCRYPTED JSON CLOUD BACKUP (20 MIN AUTO-UPDATE & RESTORE) ---
+        Text(
+            "Respaldo en la Nube de Google (Firebase)",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        val isFirebaseGoogleActive = !googleAuthUserEmail.isNullOrBlank()
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)),
+            border = BorderStroke(
+                1.5.dp,
+                if (isFirebaseGoogleActive) Color(0xFF0284C7).copy(alpha = 0.55f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isFirebaseGoogleActive) Color(0xFF0284C7).copy(alpha = 0.12f)
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (isFirebaseGoogleActive) Color(0xFF0284C7).copy(alpha = 0.35f)
+                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ResponsiveActionRow(
+                        modifier = Modifier.padding(14.dp),
+                        breakpoint = 440.dp,
+                        stackedActionAlignment = Alignment.Start,
+                        content = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    if (isFirebaseGoogleActive) Icons.Filled.CloudDone else Icons.Filled.CloudOff,
+                                    contentDescription = "Estado de Google Firebase",
+                                    tint = if (isFirebaseGoogleActive) Color(0xFF0284C7) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = if (isFirebaseGoogleActive) "Google Firebase Activo (Cada 20 min)"
+                                        else "Cuenta de Google no vinculada",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (isFirebaseGoogleActive) Color(0xFF0284C7) else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (isFirebaseGoogleActive) "Cuenta: $googleAuthUserEmail"
+                                        else "Inicia sesión con Google para activar el respaldo encriptado automático en la nube.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        action = {
+                            if (!isFirebaseGoogleActive) {
+                                Button(
+                                    onClick = {
+                                        viewModel.signInWithGoogle(context) { _, msg ->
+                                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        }
+                                    },
+                                    enabled = !isGoogleAuthLoading,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .testTag("settings_google_sign_in_button")
+                                ) {
+                                    if (isGoogleAuthLoading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    } else {
+                                        Text("Conectar Google", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+
+                Text(
+                    "Cada 20 minutos se actualiza y sobrescribe el mismo archivo JSON encriptado (AES-256 GCM) en Firebase bajo tu cuenta de Google para mantener todos tus dispositivos sincronizados.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val fbSdf = SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault())
+                        val fbTimeText = if (lastFirebaseBackupTimestamp > 0L) {
+                            fbSdf.format(Date(lastFirebaseBackupTimestamp))
+                        } else {
+                            "Aún sin respaldo en la nube"
+                        }
+                        ResponsiveActionRow(
+                            breakpoint = 360.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
+                                Text("Último Respaldo Encriptado:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
-                        ) {
-                            Icon(Icons.Filled.Save, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Guardar Cambios")
+                            action = {
+                                Text(fbTimeText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0284C7))
+                            }
+                        )
+
+                        val remoteSummary = lastFirebaseBackupSummary.ifBlank {
+                            remoteEncryptedBackupInfo?.let {
+                                "${it.productsCount} prod. • ${it.salesCount} ventas • ${it.deviceModel}"
+                            }.orEmpty()
+                        }
+                        if (remoteSummary.isNotBlank()) {
+                            ResponsiveActionRow(
+                                breakpoint = 360.dp,
+                                verticalSpacing = 2.dp,
+                                stackedActionAlignment = Alignment.Start,
+                                content = {
+                                    Text("Registro en la Nube:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                },
+                                action = {
+                                    Text(remoteSummary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = {
+                            if (!isFirebaseGoogleActive) {
+                                viewModel.signInWithGoogle(context) { success, msg ->
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    if (success) {
+                                        showRestoreGoogleBackupDialog = true
+                                    }
+                                }
+                            } else {
+                                showRestoreGoogleBackupDialog = true
+                            }
+                        },
+                        enabled = !isRestoringFirebaseBackup && !isUploadingFirebaseBackup && !isGoogleAuthLoading,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("restore_google_backup_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7))
+                    ) {
+                        if (isRestoringFirebaseBackup) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Recuperando y Sincronizando...", fontWeight = FontWeight.Bold)
+                        } else {
+                            Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Recuperar Respaldo de Google y Sincronizar", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            if (!isFirebaseGoogleActive) {
+                                Toast.makeText(context, "Primero conecta tu cuenta de Google.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                viewModel.backupEncryptedJsonToFirebaseNow { _, msg ->
+                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        enabled = !isUploadingFirebaseBackup && !isRestoringFirebaseBackup && isFirebaseGoogleActive,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag("backup_firebase_now_button"),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Color(0xFF0284C7).copy(alpha = 0.5f))
+                    ) {
+                        if (isUploadingFirebaseBackup) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Actualizando respaldo en Firebase...")
+                        } else {
+                            Icon(Icons.Filled.CloudUpload, contentDescription = null, tint = Color(0xFF0284C7), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Actualizar Respaldo Encriptado Ahora", color = Color(0xFF0284C7), fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -1494,49 +1749,52 @@ fun SettingsScreen(viewModel: PosViewModel) {
                     border = BorderStroke(1.dp, if (isCloudConnected) Color(0xFF059669).copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    ResponsiveActionRow(
                         modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                if (isCloudConnected) Icons.Filled.CloudDone else Icons.Filled.CloudOff,
-                                contentDescription = null,
-                                tint = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Column {
-                                Text(
-                                    text = if (isCloudConnected) "Conectado a la Red Supabase" else "Modo Offline (Solo Local)",
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (isCloudConnected) "Usuario: $cloudUsername" else "Sin conexión a la red de nube",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
-                        if (isCloudConnected) {
-                            OutlinedButton(
-                                onClick = {
-                                    viewModel.disconnectCloudNetwork()
-                                    Toast.makeText(context, "Desconectado de la red (Modo Offline)", Toast.LENGTH_SHORT).show()
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        breakpoint = 420.dp,
+                        stackedActionAlignment = Alignment.Start,
+                        content = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text("Desconectar", fontSize = 12.sp)
+                                Icon(
+                                    if (isCloudConnected) Icons.Filled.CloudDone else Icons.Filled.CloudOff,
+                                    contentDescription = null,
+                                    tint = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = if (isCloudConnected) "Conectado a la Red Supabase" else "Modo Offline (Solo Local)",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (isCloudConnected) "Usuario: $cloudUsername" else "Sin conexión a la red de nube",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        action = {
+                            if (isCloudConnected) {
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.disconnectCloudNetwork()
+                                        Toast.makeText(context, "Desconectado de la red (Modo Offline)", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                                ) {
+                                    Text("Desconectar", fontSize = 12.sp)
+                                }
                             }
                         }
-                    }
+                    )
                 }
 
                 // Supabase Credentials Form
@@ -1559,7 +1817,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         placeholder = { Text("Ej. usuario_empresa") },
                         leadingIcon = { Icon(Icons.Filled.AccountCircle, contentDescription = null) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
@@ -1570,52 +1828,55 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         placeholder = { Text("Clave de red") },
                         leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(12.dp)
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                if (inputCloudUsername.isBlank() || inputCloudPassword.isBlank()) {
-                                    Toast.makeText(context, "Por favor complete usuario y clave de red", Toast.LENGTH_SHORT).show()
-                                    return@Button
+                    ResponsivePair(
+                        breakpoint = 400.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 10.dp,
+                        first = { mod ->
+                            Button(
+                                onClick = {
+                                    if (inputCloudUsername.isBlank() || inputCloudPassword.isBlank()) {
+                                        Toast.makeText(context, "Por favor complete usuario y clave de red", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    isConnectingCloud = true
+                                    viewModel.saveAndConnectCloudNetwork(inputCloudUsername, inputCloudPassword) { success, msg ->
+                                        isConnectingCloud = false
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                enabled = !isConnectingCloud,
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                if (isConnectingCloud) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Validando...")
+                                } else {
+                                    Icon(Icons.Filled.CloudSync, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Guardar / Conectar")
                                 }
-                                isConnectingCloud = true
-                                viewModel.saveAndConnectCloudNetwork(inputCloudUsername, inputCloudPassword) { success, msg ->
-                                    isConnectingCloud = false
-                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                }
-                            },
-                            enabled = !isConnectingCloud,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            if (isConnectingCloud) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Validando...")
-                            } else {
-                                Icon(Icons.Filled.CloudSync, contentDescription = null)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Guardar / Conectar")
+                            }
+                        },
+                        second = { mod ->
+                            OutlinedButton(
+                                onClick = { showChangePasswordDialog = true },
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                            ) {
+                                Icon(Icons.Filled.LockReset, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Cambiar Clave", fontWeight = FontWeight.SemiBold)
                             }
                         }
-
-                        OutlinedButton(
-                            onClick = { showChangePasswordDialog = true },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                        ) {
-                            Icon(Icons.Filled.LockReset, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Cambiar Clave", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
+                    )
                 }
 
                 Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
@@ -1627,42 +1888,51 @@ fun SettingsScreen(viewModel: PosViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.Filled.PhonelinkSetup, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                Text("Dispositivo Registrado:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        ResponsiveActionRow(
+                            breakpoint = 360.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(Icons.Filled.PhonelinkSetup, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Text("Dispositivo Registrado:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            },
+                            action = {
+                                Text("${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}", fontSize = 12.sp, fontWeight = FontWeight.Medium)
                             }
-                            Text("${android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${android.os.Build.MODEL}", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        }
+                        )
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Estado de Sincronización:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                if (isCloudConnected) "Sincronización en Vivo Multi-Caja (Supabase)" else "Local / Sin Sincronización",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        ResponsiveActionRow(
+                            breakpoint = 360.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
+                                Text("Estado de Sincronización:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            },
+                            action = {
+                                Text(
+                                    if (isCloudConnected) "Sincronización en Vivo Multi-Caja (Supabase)" else "Local / Sin Sincronización",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        )
 
                         val backupSdf = SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault())
                         val backupTimeStr = if (lastPartialBackupTimestamp > 0) backupSdf.format(Date(lastPartialBackupTimestamp)) else "Registrado en inicio"
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Última Sincronización:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(backupTimeStr, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        }
+                        ResponsiveActionRow(
+                            breakpoint = 360.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
+                                Text("Última Sincronización:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            },
+                            action = {
+                                Text(backupTimeStr, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        )
                     }
                 }
 
@@ -1672,7 +1942,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             viewModel.performPartialBackup()
                             Toast.makeText(context, "Sincronización enviada a Supabase exitosamente", Toast.LENGTH_SHORT).show()
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
                     ) {
@@ -1682,26 +1952,33 @@ fun SettingsScreen(viewModel: PosViewModel) {
                     }
                 }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = { exportLauncher.launch("pos_backup.json") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Filled.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Exportar Copia")
+                ResponsivePair(
+                    breakpoint = 380.dp,
+                    horizontalSpacing = 10.dp,
+                    verticalSpacing = 10.dp,
+                    first = { mod ->
+                        Button(
+                            onClick = { exportLauncher.launch("pos_backup.json") },
+                            modifier = mod.defaultMinSize(minHeight = 48.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Filled.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Exportar Copia")
+                        }
+                    },
+                    second = { mod ->
+                        OutlinedButton(
+                            onClick = { importLauncher.launch(arrayOf("application/json")) },
+                            modifier = mod.defaultMinSize(minHeight = 48.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Restaurar")
+                        }
                     }
-                    OutlinedButton(
-                        onClick = { importLauncher.launch(arrayOf("application/json")) },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Restaurar")
-                    }
-                }
+                )
             }
         }
 
@@ -1784,40 +2061,43 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                encryptedPassphrase = ""
-                                useCustomPassphrase = false
-                                showEncryptedExportDialog = true
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
-                        ) {
-                            Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Exportar Encriptado", fontSize = 13.sp)
+                    ResponsivePair(
+                        breakpoint = 400.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 10.dp,
+                        first = { mod ->
+                            Button(
+                                onClick = {
+                                    encryptedPassphrase = ""
+                                    useCustomPassphrase = false
+                                    showEncryptedExportDialog = true
+                                },
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
+                            ) {
+                                Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Exportar Encriptado", fontSize = 13.sp)
+                            }
+                        },
+                        second = { mod ->
+                            FilledTonalButton(
+                                onClick = {
+                                    encryptedPassphrase = ""
+                                    useCustomPassphrase = false
+                                    importAppendMode = true
+                                    showEncryptedImportDialog = true
+                                },
+                                modifier = mod.defaultMinSize(minHeight = 48.dp),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Filled.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Importar / Anexar", fontSize = 13.sp)
+                            }
                         }
-
-                        FilledTonalButton(
-                            onClick = {
-                                encryptedPassphrase = ""
-                                useCustomPassphrase = false
-                                importAppendMode = true
-                                showEncryptedImportDialog = true
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Filled.FileUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Importar / Anexar", fontSize = 13.sp)
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -1829,44 +2109,45 @@ fun SettingsScreen(viewModel: PosViewModel) {
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        "SmartPOS286",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        "Versión 1.0.1 BETA • Base de Datos v18",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        "Esquema de datos optimizado con soporte para cantidades decimales y recetas",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                    )
+            ResponsiveActionRow(
+                modifier = Modifier.padding(16.dp),
+                breakpoint = 380.dp,
+                stackedActionAlignment = Alignment.Start,
+                content = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "SmartPOS286",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "Versión 1.0.1 BETA • Base de Datos v18",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "Esquema de datos optimizado con soporte para cantidades decimales y recetas",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                },
+                action = {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF059669).copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            "ACTUALIZADO",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = Color(0xFF059669),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF059669).copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        "ACTUALIZADO",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = Color(0xFF059669),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
+            )
         }
         Spacer(modifier = Modifier.height(24.dp))
         }
@@ -1877,7 +2158,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
         val dateStamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
         val defaultFileName = "cajapos_backup_$dateStamp.cajapos"
 
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { if (!isProcessingEncrypted) showEncryptedExportDialog = false },
             icon = { Icon(Icons.Filled.EnhancedEncryption, contentDescription = null, tint = Color(0xFF4F46E5)) },
             title = { Text("Exportar Data Encriptada (AES-256)") },
@@ -1906,7 +2187,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Personalizar clave de cifrado:", fontSize = 13.sp)
+                        Text("Personalizar clave de cifrado:", fontSize = 13.sp, modifier = Modifier.weight(1f).padding(end = 8.dp))
                         Switch(
                             checked = useCustomPassphrase,
                             onCheckedChange = { useCustomPassphrase = it }
@@ -1920,7 +2201,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             label = { Text("Clave / Passphrase personal") },
                             placeholder = { Text("Ej. MiClaveSegura2026") },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                             shape = RoundedCornerShape(10.dp)
                         )
                         Text(
@@ -1973,7 +2254,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
 
     // --- DIALOG IMPORTAR Y ANEXAR DATA ENCRIPTADA ---
     if (showEncryptedImportDialog) {
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { if (!isProcessingEncrypted) showEncryptedImportDialog = false },
             icon = { Icon(Icons.Filled.LockOpen, contentDescription = null, tint = Color(0xFF059669)) },
             title = { Text("Importar y Desencriptar Data") },
@@ -1985,9 +2266,10 @@ fun SettingsScreen(viewModel: PosViewModel) {
                     )
 
                     Text("Modo de Integración:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         FilterChip(
                             selected = importAppendMode,
@@ -2015,7 +2297,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("¿Fue exportado con clave personalizada?:", fontSize = 13.sp)
+                        Text("¿Fue exportado con clave personalizada?:", fontSize = 13.sp, modifier = Modifier.weight(1f).padding(end = 8.dp))
                         Switch(
                             checked = useCustomPassphrase,
                             onCheckedChange = { useCustomPassphrase = it }
@@ -2028,7 +2310,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             onValueChange = { encryptedPassphrase = it },
                             label = { Text("Clave / Passphrase") },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                             shape = RoundedCornerShape(10.dp)
                         )
                     }
@@ -2069,7 +2351,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
     }
 
     if (showNotificationsDialog) {
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { showNotificationsDialog = false },
             icon = { Icon(Icons.Filled.NotificationsActive, contentDescription = null, tint = Color(0xFFEF4444)) },
             title = { Text("Notificaciones del Sistema", fontWeight = FontWeight.Bold) },
@@ -2149,6 +2431,67 @@ fun SettingsScreen(viewModel: PosViewModel) {
         ChangePasswordDialog(
             viewModel = viewModel,
             onDismissRequest = { showChangePasswordDialog = false }
+        )
+    }
+
+    if (showRestoreGoogleBackupDialog) {
+        KeyboardAwareAlertDialog(
+            onDismissRequest = { if (!isRestoringFirebaseBackup) showRestoreGoogleBackupDialog = false },
+            icon = { Icon(Icons.Filled.CloudDownload, contentDescription = null, tint = Color(0xFF0284C7)) },
+            title = { Text("Recuperar Respaldo de Google", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Se descargará el último respaldo JSON encriptado desde Firebase para la cuenta ${googleAuthUserEmail.orEmpty()}, se verificará su integridad AES-256 GCM y se sincronizará este dispositivo.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = !googleRestoreAppendMode,
+                            onClick = { googleRestoreAppendMode = false },
+                            label = { Text("Sincronizar Exacto") }
+                        )
+                        FilterChip(
+                            selected = googleRestoreAppendMode,
+                            onClick = { googleRestoreAppendMode = true },
+                            label = { Text("Fusionar Nuevos") }
+                        )
+                    }
+
+                    Text(
+                        if (!googleRestoreAppendMode)
+                            "• Actualiza precios/stock existentes desde la nube y agrega ventas, clientes y facturas faltantes sin duplicar."
+                        else
+                            "• Mantiene tus datos locales actuales e incorpora registros faltantes desde el respaldo de la nube.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showRestoreGoogleBackupDialog = false
+                        viewModel.restoreGoogleFirebaseBackupAndSync(appendMode = googleRestoreAppendMode) { _, msg ->
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                    modifier = Modifier.testTag("confirm_restore_google_backup_button")
+                ) {
+                    Text("Recuperar y Sincronizar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreGoogleBackupDialog = false }) {
+                    Text("Cancelar")
+                }
+            }
         )
     }
 }

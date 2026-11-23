@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -29,15 +31,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.abs
@@ -53,12 +56,21 @@ import com.example.data.local.DeliveryNote
 import com.example.data.local.DeliveryNoteItem
 import com.example.data.local.HeldSale
 import com.example.ui.components.DeliveryNoteDialog
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.KeyboardAwareDialog
 import com.example.ui.components.LicenseDialog
+import com.example.ui.components.ResponsiveActionRow
 import com.example.ui.components.TicketDialog
+import com.example.ui.components.bringIntoViewOnFocus
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun PosScreen(viewModel: PosViewModel) {
+fun PosScreen(
+    viewModel: PosViewModel,
+    isSidebarVisible: Boolean = false,
+    onToggleMenu: (() -> Unit)? = null,
+    onNavigateHome: (() -> Unit)? = null
+) {
     val bcvRate by viewModel.bcvRate.collectAsStateWithLifecycle()
     val cart by viewModel.cart.collectAsStateWithLifecycle()
     val products by viewModel.allProducts.collectAsStateWithLifecycle()
@@ -132,7 +144,8 @@ fun PosScreen(viewModel: PosViewModel) {
     }
 
     Scaffold(
-        containerColor = Color.Transparent
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
         val configuration = LocalConfiguration.current
         val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -161,14 +174,12 @@ fun PosScreen(viewModel: PosViewModel) {
                     ) {
                         BcvRateAndLicenseBar(
                             bcvRate = bcvRate,
-                            isLicensed = isLicensed,
-                            todaySalesCount = todaySalesCount,
-                            isUnlimitedInvoices = isUnlimitedInvoices,
-                            customDailyInvoiceLimit = customDailyInvoiceLimit,
                             heldSalesCount = heldSales.size,
+                            isSidebarVisible = isSidebarVisible,
+                            onToggleMenu = onToggleMenu,
+                            onNavigateHome = onNavigateHome,
                             onHeldSalesClick = { showHeldSalesListDialog = true },
                             onEditRateClick = { showEditRateDialog = true },
-                            onLicenseClick = { showLicenseDialog = true },
                             onRefreshRateClick = { viewModel.refreshRate() }
                         )
 
@@ -202,23 +213,12 @@ fun PosScreen(viewModel: PosViewModel) {
                             onAddNewCustomer = { showAddCustomerDialog = true }
                         )
 
-                        OutlinedTextField(
+                        CompactPosSearchField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Buscar por nombre o código...") },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Filled.Clear, contentDescription = "Limpiar")
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            singleLine = true,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp)
+                                .padding(vertical = 2.dp)
                                 .testTag("pos_search_input")
                         )
 
@@ -373,42 +373,80 @@ fun PosScreen(viewModel: PosViewModel) {
             }
         } else {
             Column(modifier = Modifier.padding(padding).fillMaxSize()) {
-            // BCV Exchange Rate Header & Daily Invoices Badge
+            // Compact BCV Exchange Rate Header with Navigation Menu Toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(start = 8.dp, end = 12.dp, top = 2.dp, bottom = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.clickable { showEditRateDialog = true }
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        Icons.Filled.CurrencyExchange,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        "Tasa BCV: Bs. ${String.format("%.2f", bcvRate)}",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Icon(
-                        Icons.Filled.Edit,
-                        contentDescription = "Editar tasa",
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(14.dp)
-                    )
+                    if (onToggleMenu != null) {
+                        IconButton(
+                            onClick = onToggleMenu,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .minimumInteractiveComponentSize()
+                                .testTag("pos_menu_button")
+                        ) {
+                            Icon(
+                                if (isSidebarVisible) Icons.Filled.MenuOpen else Icons.Filled.Menu,
+                                contentDescription = "Alternar menú principal",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    if (onNavigateHome != null) {
+                        IconButton(
+                            onClick = onNavigateHome,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .minimumInteractiveComponentSize()
+                                .testTag("pos_home_button")
+                        ) {
+                            Icon(
+                                Icons.Filled.Home,
+                                contentDescription = "Ir a módulos principales",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier
+                            .clickable { showEditRateDialog = true }
+                            .padding(horizontal = 4.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.CurrencyExchange,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            "Tasa BCV: Bs. ${String.format("%.2f", bcvRate)}",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Icon(
+                            Icons.Filled.Edit,
+                            contentDescription = "Editar tasa",
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                 }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     if (heldSales.isNotEmpty()) {
                         Surface(
@@ -438,52 +476,18 @@ fun PosScreen(viewModel: PosViewModel) {
                         }
                     }
 
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isLicensed) Color(0xFF059669).copy(alpha = 0.12f)
-                        else if (todaySalesCount >= 5) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-                        else Color(0xFFD97706).copy(alpha = 0.12f),
-                        border = BorderStroke(
-                            1.dp,
-                            if (isLicensed) Color(0xFF059669).copy(alpha = 0.3f)
-                            else if (todaySalesCount >= 5) MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-                            else Color(0xFFD97706).copy(alpha = 0.35f)
-                        ),
-                        modifier = Modifier.clickable { showLicenseDialog = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                if (isLicensed) Icons.Filled.ReceiptLong else Icons.Filled.LockClock,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = if (isLicensed) Color(0xFF059669)
-                                else if (todaySalesCount >= 5) MaterialTheme.colorScheme.error
-                                else Color(0xFFD97706)
-                            )
-                            Text(
-                                text = if (isLicensed) {
-                                    "Facturas: $todaySalesCount/${if (isUnlimitedInvoices) "∞" else "$customDailyInvoiceLimit"}"
-                                } else {
-                                    "Facturas: $todaySalesCount/5"
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isLicensed) Color(0xFF059669)
-                                else if (todaySalesCount >= 5) MaterialTheme.colorScheme.error
-                                else Color(0xFFD97706)
-                            )
-                        }
-                    }
-
                     IconButton(
                         onClick = { viewModel.refreshRate() },
-                        modifier = Modifier.size(32.dp)
+                        modifier = Modifier
+                            .size(36.dp)
+                            .minimumInteractiveComponentSize()
                     ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Actualizar Tasa", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = "Actualizar Tasa",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
@@ -492,18 +496,18 @@ fun PosScreen(viewModel: PosViewModel) {
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)
                 ) {
                     Text(
                         voiceStatus,
-                        modifier = Modifier.padding(10.dp),
-                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(8.dp),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
 
-            // Customer Selector & Uncompressed "Add Customer" Button below
+            // Compact Customer Selector & Icon-only Add Customer Button (collapses when selected)
             CustomerSelectorCard(
                 customerDoc = customerDoc,
                 customerName = customerName,
@@ -517,33 +521,23 @@ fun PosScreen(viewModel: PosViewModel) {
                 onAddNewCustomer = { showAddCustomerDialog = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                    .padding(horizontal = 16.dp, vertical = 2.dp)
             )
 
-            // Product Search / Scanner Bar
+            // Slim Product Search / Scanner Bar
             ExposedDropdownMenuBox(
                 expanded = isDropdownExpanded,
                 onExpandedChange = { isDropdownExpanded = !isDropdownExpanded },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(horizontal = 16.dp, vertical = 3.dp)
             ) {
-                OutlinedTextField(
+                CompactPosSearchField(
                     value = searchQuery,
                     onValueChange = {
                         searchQuery = it
                         isDropdownExpanded = true
                     },
-                    label = { Text("Buscar producto por nombre o código...") },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Limpiar")
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .menuAnchor(MenuAnchorType.PrimaryEditable)
                         .fillMaxWidth()
@@ -918,12 +912,13 @@ fun PosScreen(viewModel: PosViewModel) {
             customerName = customerName,
             customerDocument = customerDoc,
             onDismiss = { showCreateDeliveryNoteDialog = false },
-            onConfirm = { cName, cDoc, recip, reason ->
+            onConfirm = { cName, cDoc, recip, reason, displayCurrency ->
                 viewModel.processDeliveryNote(
                     customerName = cName,
                     customerDocument = cDoc,
                     recipientName = recip,
                     reasonOrObservation = reason,
+                    displayCurrency = displayCurrency,
                     onSuccess = { createdNote ->
                         showCreateDeliveryNoteDialog = false
                         coroutineScope.launch {
@@ -938,7 +933,7 @@ fun PosScreen(viewModel: PosViewModel) {
     }
 
     if (showLimitInvoiceDialog) {
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { showLimitInvoiceDialog = false },
             icon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = {
@@ -1074,7 +1069,7 @@ fun EditRateDialog(
 ) {
     var rateStr by remember { mutableStateOf(String.format("%.2f", currentRate).replace(",", ".")) }
 
-    AlertDialog(
+    KeyboardAwareAlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(
@@ -1096,7 +1091,7 @@ fun EditRateDialog(
                     onValueChange = { rateStr = it },
                     label = { Text("Tasa (Bs / USD)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                     shape = RoundedCornerShape(10.dp)
                 )
             }
@@ -1119,6 +1114,7 @@ fun EditRateDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun QuickAddCustomerDialog(
     initialDoc: String,
@@ -1134,16 +1130,15 @@ fun QuickAddCustomerDialog(
     var phone by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 520.dp,
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 8.dp
+    ) {
             Column(
                 modifier = Modifier
-                    .padding(20.dp)
+                    .padding(18.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -1201,7 +1196,7 @@ fun QuickAddCustomerDialog(
                         label = { Text("Cédula / RIF *") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).bringIntoViewOnFocus()
                     )
                 }
 
@@ -1211,7 +1206,7 @@ fun QuickAddCustomerDialog(
                     label = { Text("Nombre o Razón Social *") },
                     leadingIcon = { Icon(Icons.Filled.Badge, contentDescription = null) },
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
                 OutlinedTextField(
@@ -1221,7 +1216,7 @@ fun QuickAddCustomerDialog(
                     leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
                 OutlinedTextField(
@@ -1230,18 +1225,20 @@ fun QuickAddCustomerDialog(
                     label = { Text("Dirección (Opcional)") },
                     leadingIcon = { Icon(Icons.Filled.Home, contentDescription = null) },
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    ) {
                         Text("Cancelar")
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             val fullDoc = "$docPrefix${docNumber.trim()}"
@@ -1250,13 +1247,13 @@ fun QuickAddCustomerDialog(
                             }
                         },
                         enabled = name.isNotBlank() && docNumber.isNotBlank(),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                     ) {
                         Text("Guardar y Asignar")
                     }
                 }
             }
-        }
     }
 }
 
@@ -1266,6 +1263,7 @@ private fun parseUserAmount(input: String): Double {
     return sanitized.toDoubleOrNull() ?: 0.0
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CheckoutDialog(
     viewModel: PosViewModel,
@@ -1345,13 +1343,12 @@ fun CheckoutDialog(
     val remainingUsd = totalDueUsd - totalPaidUsd
     val remainingBs = remainingUsd * effectiveRate
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth().widthIn(max = 560.dp).padding(vertical = 12.dp)
-        ) {
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 560.dp,
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 6.dp
+    ) {
             Column(
                 modifier = Modifier
                     .padding(18.dp)
@@ -1378,45 +1375,50 @@ fun CheckoutDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Total a Pagar:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        ResponsiveActionRow(
+                            breakpoint = 310.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = { Text("Total a Pagar:", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold) },
+                            action = {
+                                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        "\$${String.format("%.2f", totalDueUsd)} USD",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        "(Bs. ${String.format("%.2f", totalDueBs)})",
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        )
+
+                        ResponsiveActionRow(
+                            breakpoint = 310.dp,
+                            verticalSpacing = 2.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
                                 Text(
-                                    "\$${String.format("%.2f", totalDueUsd)} USD",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    "(Bs. ${String.format("%.2f", totalDueBs)})",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
+                                    "Base: \$${String.format("%.2f", baseTaxableUsd)}" +
+                                        (if (baseExemptUsd > 0.001) " • Exento: \$${String.format("%.2f", baseExemptUsd)}" else "") +
+                                        " • IVA (16%): \$${String.format("%.2f", ivaUsd)}",
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            },
+                            action = {
+                                Text(
+                                    "Tasa: Bs. ${String.format("%.2f", effectiveRate)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                "Base: \$${String.format("%.2f", baseTaxableUsd)}" +
-                                    (if (baseExemptUsd > 0.001) " • Exento: \$${String.format("%.2f", baseExemptUsd)}" else "") +
-                                    " • IVA (16%): \$${String.format("%.2f", ivaUsd)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "Tasa: Bs. ${String.format("%.2f", effectiveRate)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        )
 
                         if (effectiveDiscountUsd > 0.001) {
                             Surface(
@@ -1524,7 +1526,7 @@ fun CheckoutDialog(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             singleLine = true,
                             shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                         )
                         Text(
                             "Se descuenta del subtotal antes de aplicar el 16% de IVA.",
@@ -1577,7 +1579,7 @@ fun CheckoutDialog(
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                     )
                 }
 
@@ -1625,7 +1627,7 @@ fun CheckoutDialog(
                         prefix = { Text("\$ ", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                     )
                 }
 
@@ -1669,7 +1671,7 @@ fun CheckoutDialog(
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                     )
                 }
 
@@ -1731,6 +1733,7 @@ fun CheckoutDialog(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .bringIntoViewOnFocus()
                             .testTag("checkout_cashea_input")
                     )
                 }
@@ -1777,7 +1780,7 @@ fun CheckoutDialog(
                         },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                     )
 
                     // Credit due date and details if credit is granted
@@ -1795,16 +1798,16 @@ fun CheckoutDialog(
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF92400E)
                                 )
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     listOf(7, 15, 30, 45).forEach { days ->
                                         FilterChip(
                                             selected = creditDueDateDays == days,
                                             onClick = { creditDueDateDays = days },
-                                            label = { Text("$days Días", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) },
-                                            modifier = Modifier.weight(1f)
+                                            label = { Text("$days Días", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
                                         )
                                     }
                                 }
@@ -1814,7 +1817,7 @@ fun CheckoutDialog(
                                     label = { Text("Notas o condiciones del crédito", fontSize = 11.sp) },
                                     placeholder = { Text("Ej: Pago acordado quincena...", fontSize = 11.sp) },
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                                 )
                                 Text(
                                     "ℹ️ La deuda de $${String.format(java.util.Locale.US, "%.2f", paidCreditUsd)} USD quedará registrada a nombre de '${customerName.ifBlank { "Consumidor Final" }}' para su cobranza posterior.",
@@ -1931,15 +1934,17 @@ fun CheckoutDialog(
                 }
 
                 // Actions
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    ) {
                         Text("Cancelar")
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             val creditDueTimestamp = if (paidCreditUsd > 0.001) {
@@ -1967,13 +1972,13 @@ fun CheckoutDialog(
                             )
                         },
                         enabled = canProcessSale && (isPaidComplete || totalPaidUsd > 0.0),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                     ) {
                         Text("Confirmar Venta")
                     }
                 }
             }
-        }
     }
 
     if (showLicenseDialogInCheckout) {
@@ -1984,6 +1989,7 @@ fun CheckoutDialog(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditCartItemDialog(
     item: CartItem,
@@ -2000,7 +2006,7 @@ fun EditCartItemDialog(
         )
     }
 
-    AlertDialog(
+    KeyboardAwareAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Editar Item") },
         text = {
@@ -2012,7 +2018,7 @@ fun EditCartItemDialog(
                     onValueChange = { quantityStr = it },
                     label = { Text("Cantidad") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                     supportingText = {
                         if (!item.product.allowDecimalQuantity) {
                             Text("Solo cantidades enteras permitidas")
@@ -2028,9 +2034,10 @@ fun EditCartItemDialog(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Row(
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             FilterChip(
                                 selected = !selectedWholesale,
@@ -2044,9 +2051,7 @@ fun EditCartItemDialog(
                                         fontSize = 12.sp
                                     )
                                 },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("pos_normal_price_chip")
+                                modifier = Modifier.testTag("pos_normal_price_chip")
                             )
                             FilterChip(
                                 selected = selectedWholesale,
@@ -2060,9 +2065,7 @@ fun EditCartItemDialog(
                                         fontSize = 12.sp
                                     )
                                 },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("pos_wholesale_price_chip")
+                                modifier = Modifier.testTag("pos_wholesale_price_chip")
                             )
                         }
                     }
@@ -2080,7 +2083,7 @@ fun EditCartItemDialog(
                         },
                         label = { Text("Precio Unitario ($)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         supportingText = { Text("Precio original: \$${String.format("%.2f", item.product.priceUsd)}") }
                     )
                 }
@@ -2096,7 +2099,11 @@ fun EditCartItemDialog(
                 }
                 
                 val finalQ = if (item.product.allowDecimalQuantity) q else q.toInt().toDouble()
-                onConfirm(finalQ, p)
+                if (finalQ <= 0.0) {
+                    onDelete()
+                } else {
+                    onConfirm(finalQ, p)
+                }
             }) {
                 Text("Confirmar")
             }
@@ -2161,53 +2168,157 @@ fun CategoryFilterChipsRow(
 }
 
 @Composable
+fun CompactPosSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.height(44.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Search,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = "Buscar",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            if (value.isNotEmpty()) {
+                IconButton(
+                    onClick = { onValueChange("") },
+                    modifier = Modifier
+                        .size(32.dp)
+                        .minimumInteractiveComponentSize()
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Clear,
+                        contentDescription = "Limpiar",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun BcvRateAndLicenseBar(
     bcvRate: Double,
-    isLicensed: Boolean,
-    todaySalesCount: Int,
-    isUnlimitedInvoices: Boolean,
-    customDailyInvoiceLimit: Int,
     heldSalesCount: Int = 0,
+    isSidebarVisible: Boolean = false,
+    onToggleMenu: (() -> Unit)? = null,
+    onNavigateHome: (() -> Unit)? = null,
     onHeldSalesClick: () -> Unit = {},
     onEditRateClick: () -> Unit,
-    onLicenseClick: () -> Unit,
     onRefreshRateClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.clickable { onEditRateClick() }
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Icon(
-                Icons.Filled.CurrencyExchange,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                "Tasa BCV: Bs. ${String.format("%.2f", bcvRate)}",
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Icon(
-                Icons.Filled.Edit,
-                contentDescription = "Editar tasa",
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                modifier = Modifier.size(14.dp)
-            )
+            if (onToggleMenu != null) {
+                IconButton(
+                    onClick = onToggleMenu,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .minimumInteractiveComponentSize()
+                        .testTag("pos_landscape_menu_button")
+                ) {
+                    Icon(
+                        if (isSidebarVisible) Icons.Filled.MenuOpen else Icons.Filled.Menu,
+                        contentDescription = "Alternar menú principal",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            if (onNavigateHome != null) {
+                IconButton(
+                    onClick = onNavigateHome,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .minimumInteractiveComponentSize()
+                        .testTag("pos_landscape_home_button")
+                ) {
+                    Icon(
+                        Icons.Filled.Home,
+                        contentDescription = "Ir a módulos principales",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier
+                    .clickable { onEditRateClick() }
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
+            ) {
+                Icon(
+                    Icons.Filled.CurrencyExchange,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    "Tasa BCV: Bs. ${String.format("%.2f", bcvRate)}",
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "Editar tasa",
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                    modifier = Modifier.size(13.dp)
+                )
+            }
         }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (heldSalesCount > 0) {
                 Surface(
@@ -2237,52 +2348,18 @@ fun BcvRateAndLicenseBar(
                 }
             }
 
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (isLicensed) Color(0xFF059669).copy(alpha = 0.12f)
-                else if (todaySalesCount >= 5) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-                else Color(0xFFD97706).copy(alpha = 0.12f),
-                border = BorderStroke(
-                    1.dp,
-                    if (isLicensed) Color(0xFF059669).copy(alpha = 0.3f)
-                    else if (todaySalesCount >= 5) MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-                    else Color(0xFFD97706).copy(alpha = 0.35f)
-                ),
-                modifier = Modifier.clickable { onLicenseClick() }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        if (isLicensed) Icons.Filled.ReceiptLong else Icons.Filled.LockClock,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp),
-                        tint = if (isLicensed) Color(0xFF059669)
-                        else if (todaySalesCount >= 5) MaterialTheme.colorScheme.error
-                        else Color(0xFFD97706)
-                    )
-                    Text(
-                        text = if (isLicensed) {
-                            "Facturas: $todaySalesCount/${if (isUnlimitedInvoices) "∞" else "$customDailyInvoiceLimit"}"
-                        } else {
-                            "Facturas: $todaySalesCount/5"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isLicensed) Color(0xFF059669)
-                        else if (todaySalesCount >= 5) MaterialTheme.colorScheme.error
-                        else Color(0xFFD97706)
-                    )
-                }
-            }
-
             IconButton(
                 onClick = onRefreshRateClick,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier
+                    .size(36.dp)
+                    .minimumInteractiveComponentSize()
             ) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Actualizar Tasa", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = "Actualizar Tasa",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
     }
@@ -2298,37 +2375,120 @@ fun CustomerSelectorCard(
     isCustomerDropdownExpanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     onAddNewCustomer: () -> Unit,
-    modifier: Modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+    modifier: Modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
 ) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp)
+    val hasSelectedCustomer = customerName.isNotBlank() || customerDoc.isNotBlank()
+
+    if (hasSelectedCustomer) {
+        Surface(
+            modifier = modifier,
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 10.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Person,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (customerDoc == "V-00000000") {
+                            "Cliente: Consumidor Final"
+                        } else if (customerDoc.isNotBlank() && customerName.isNotBlank()) {
+                            "Cliente: $customerName ($customerDoc)"
+                        } else {
+                            "Cliente: ${customerName.ifBlank { customerDoc }}"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        onExpandedChange(false)
+                        onCustomerSelected("", "")
+                    },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .minimumInteractiveComponentSize()
+                        .testTag("pos_clear_customer_button")
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Quitar cliente",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    } else {
+        Row(
+            modifier = modifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             ExposedDropdownMenuBox(
                 expanded = isCustomerDropdownExpanded,
                 onExpandedChange = onExpandedChange,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.weight(1f)
             ) {
-                OutlinedTextField(
-                    value = if (customerDoc.isBlank() && customerName.isBlank()) "" else "$customerDoc - $customerName",
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Cliente para la factura") },
-                    placeholder = { Text("Elegir cliente...") },
-                    leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
                     modifier = Modifier
                         .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                        .fillMaxWidth(),
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCustomerDropdownExpanded) },
-                    shape = RoundedCornerShape(10.dp)
-                )
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .testTag("pos_customer_selector_field")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Filled.Person,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "Seleccionar cliente...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCustomerDropdownExpanded)
+                    }
+                }
                 ExposedDropdownMenu(
                     expanded = isCustomerDropdownExpanded,
                     onDismissRequest = { onExpandedChange(false) }
@@ -2353,29 +2513,19 @@ fun CustomerSelectorCard(
                 }
             }
 
-            Row(
+            FilledTonalIconButton(
+                onClick = onAddNewCustomer,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .size(44.dp)
+                    .minimumInteractiveComponentSize()
+                    .testTag("pos_add_customer_button"),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Text(
-                    text = if (customerDoc == "V-00000000" || (customerDoc.isBlank() && customerName.isBlank())) "Cliente: Consumidor Final" else "Cliente: $customerName",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f, fill = false)
+                Icon(
+                    Icons.Filled.PersonAdd,
+                    contentDescription = "Añadir cliente",
+                    modifier = Modifier.size(20.dp)
                 )
-
-                TextButton(
-                    onClick = onAddNewCustomer,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Icon(Icons.Filled.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("+ Añadir nuevo cliente", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                }
             }
         }
     }

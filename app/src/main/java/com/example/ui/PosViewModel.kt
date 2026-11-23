@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import android.net.Uri
 import android.content.Context
 import com.example.data.local.AppDatabase
+import com.example.data.local.CasheaSettlement
 import com.example.utils.SecureEncryptedBackupManager
 import com.example.utils.ImportBackupResult
 import com.example.data.local.Customer
@@ -13,6 +14,7 @@ import com.example.data.local.DeliveryNoteItem
 import com.example.data.local.Expense
 import com.example.data.local.HeldSale
 import com.example.data.local.HeldSaleItem
+import com.example.data.local.PosTerminalRecord
 import com.example.data.local.Product
 import com.example.data.local.Quote
 import com.example.data.local.QuoteItem
@@ -30,6 +32,13 @@ import com.example.utils.GeminiLiveCallbacks
 import com.example.utils.GeminiLiveManager
 import com.example.utils.GeminiLiveStatus
 import com.example.utils.SpeechToTextManager
+import com.example.utils.ExtractedInvoiceItem
+import com.example.utils.ParsedInvoiceOcrResult
+import com.example.utils.ParsedPosTicketResult
+import com.example.utils.PosTicketOcrParser
+import com.example.utils.PosTicketOcrScanner
+import com.example.utils.PurchaseInvoiceOcrParser
+import com.example.utils.PurchaseInvoiceOcrScanner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -67,6 +76,8 @@ class PosViewModel(
     val allDeliveryNotes = repository.allDeliveryNotes.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allQuotes = repository.allQuotes.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     val allExpenses = repository.allExpenses.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val allCasheaSettlements = repository.allCasheaSettlements.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val allPosTerminalRecords = repository.allPosTerminalRecords.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser = _currentUser.asStateFlow()
@@ -79,6 +90,12 @@ class PosViewModel(
 
     private val _quoteCart = MutableStateFlow<List<CartItem>>(emptyList())
     val quoteCart = _quoteCart.asStateFlow()
+
+    private val _deliveryNoteCart = MutableStateFlow<List<CartItem>>(emptyList())
+    val deliveryNoteCart = _deliveryNoteCart.asStateFlow()
+
+    private val _deliveryNoteCurrency = MutableStateFlow("USD")
+    val deliveryNoteCurrency = _deliveryNoteCurrency.asStateFlow()
 
     private val _posPrefillCustomer = MutableStateFlow<Pair<String, String>?>(null)
     val posPrefillCustomer = _posPrefillCustomer.asStateFlow()
@@ -173,6 +190,12 @@ class PosViewModel(
     val googleAuthUserEmail = _googleAuthUserEmail.asStateFlow()
 
     val firestoreSyncError: StateFlow<String?> = firestoreSyncRepository.lastError
+
+    val lastFirebaseBackupTimestamp: StateFlow<Long> = firestoreSyncRepository.lastEncryptedBackupTimestamp
+    val lastFirebaseBackupSummary: StateFlow<String> = firestoreSyncRepository.lastEncryptedBackupSummary
+    val remoteEncryptedBackupInfo: StateFlow<com.example.data.remote.FsEncryptedBackup?> = firestoreSyncRepository.remoteEncryptedBackupInfo
+    val isUploadingFirebaseBackup: StateFlow<Boolean> = firestoreSyncRepository.isUploadingEncryptedBackup
+    val isRestoringFirebaseBackup: StateFlow<Boolean> = firestoreSyncRepository.isRestoringEncryptedBackup
 
     fun signInWithGoogle(context: Context, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
@@ -332,6 +355,18 @@ class PosViewModel(
     private val _licenseStatus = MutableStateFlow(prefs.licenseStatus)
     val licenseStatus = _licenseStatus.asStateFlow()
 
+    val lowStockAlertProducts: StateFlow<List<Product>> = allProducts
+        .map { products ->
+            products
+                .filter { it.isLowStockAlertTriggered(products) }
+                .sortedWith(
+                    compareBy<Product> { it.effectiveStockForAlert(products) > 1e-6 }
+                        .thenBy { it.effectiveStockForAlert(products) }
+                        .thenBy { it.name.lowercase(java.util.Locale.ROOT) }
+                )
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // --- SYSTEM NOTIFICATIONS (REAL-TIME ALERTS) ---
     val systemNotifications: StateFlow<List<SystemNotification>> = combine(
         allProducts,
@@ -341,23 +376,29 @@ class PosViewModel(
     ) { products, licensed, expiry, fullTime ->
         val list = mutableListOf<SystemNotification>()
 
-        // 1. Low stock check
-        val lowStockProducts = products.filter { it.stock <= 5 && it.stock > 0 }
+        // 1. Configurable per-product Low Stock & Out-of-Stock check
+        val triggeredProducts = products.filter { it.isLowStockAlertTriggered(products) }
+        val outOfStock = triggeredProducts.filter { it.isOutOfStockAlertTriggered(products) }
+        val lowStockProducts = triggeredProducts.filter { !it.isOutOfStockAlertTriggered(products) }
+
         if (lowStockProducts.isNotEmpty()) {
+            val previewNames = lowStockProducts.take(3).joinToString(", ") { it.name }
+            val extra = if (lowStockProducts.size > 3) " y ${lowStockProducts.size - 3} más" else ""
             list.add(SystemNotification(
                 id = "low_stock",
-                title = "Existencias Bajas",
-                message = "Hay ${lowStockProducts.size} productos con stock igual o menor a 5 unidades.",
+                title = "Existencias en Stock Mínimo (${lowStockProducts.size})",
+                message = "Alcanzaron su mínimo definido: $previewNames$extra.",
                 type = NotificationType.LOW_STOCK
             ))
         }
 
-        val outOfStock = products.filter { it.stock <= 0 }
         if (outOfStock.isNotEmpty()) {
+            val previewNames = outOfStock.take(3).joinToString(", ") { it.name }
+            val extra = if (outOfStock.size > 3) " y ${outOfStock.size - 3} más" else ""
             list.add(SystemNotification(
                 id = "out_of_stock",
-                title = "Productos Agotados",
-                message = "Tienes ${outOfStock.size} productos sin existencias en inventario.",
+                title = "Productos Agotados (${outOfStock.size})",
+                message = "Sin existencias en inventario: $previewNames$extra.",
                 type = NotificationType.LOW_STOCK
             ))
         }
@@ -1453,6 +1494,131 @@ class PosViewModel(
         }
     }
 
+    fun addCasheaSettlement(
+        settlementDate: Long,
+        grossAmountUsd: Double,
+        commissionPercentage: Double,
+        notes: String = "",
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val safeGross = maxOf(0.0, grossAmountUsd)
+            val safePct = commissionPercentage.coerceIn(0.0, 100.0)
+            val commissionAmountUsd = safeGross * (safePct / 100.0)
+            val netReceivedUsd = maxOf(0.0, safeGross - commissionAmountUsd)
+            val rate = if (_bcvRate.value > 0.001) _bcvRate.value else 1.0
+            val registeredUser = _currentUser.value?.username ?: "Administrador"
+
+            repository.insertCasheaSettlement(
+                CasheaSettlement(
+                    settlementDate = settlementDate,
+                    grossAmountUsd = safeGross,
+                    commissionPercentage = safePct,
+                    commissionAmountUsd = commissionAmountUsd,
+                    netReceivedUsd = netReceivedUsd,
+                    rateBcv = rate,
+                    notes = notes.trim(),
+                    registeredBy = registeredUser
+                )
+            )
+            cloudSyncRepository.syncInstantBackend()
+            onSuccess()
+        }
+    }
+
+    fun deleteCasheaSettlement(settlement: CasheaSettlement, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.deleteCasheaSettlement(settlement)
+            cloudSyncRepository.syncInstantBackend()
+            onSuccess()
+        }
+    }
+
+    // --- POS Terminal Voucher Records (Puntos de Venta) ---
+
+    suspend fun scanPosTicketImage(context: Context, imageUri: Uri): Result<ParsedPosTicketResult> {
+        return PosTicketOcrScanner.scanAndExtractTicket(
+            context = context,
+            imageUri = imageUri,
+            geminiRepository = geminiRepository
+        )
+    }
+
+    fun reparsePosTicketText(rawText: String): ParsedPosTicketResult {
+        return PosTicketOcrParser.parseFromRawText(rawText)
+    }
+
+    fun addPosTerminalRecord(
+        transactionDateTime: String,
+        receiptNumber: String,
+        referenceNumber: String,
+        approvalNumber: String,
+        maskedCardNumber: String,
+        operationType: String,
+        totalAmount: Double,
+        currency: String,
+        transactionStatus: String,
+        bankOrTerminal: String = "",
+        notes: String = "",
+        rawOcrText: String = "",
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val cleanDateTime = transactionDateTime.trim().ifBlank {
+                PosTicketOcrParser.formatMillis(System.currentTimeMillis())
+            }
+            val parsedTs = PosTicketOcrParser.parseDateTimeToMillis(cleanDateTime) ?: System.currentTimeMillis()
+            val registeredUser = _currentUser.value?.username ?: "Administrador"
+
+            repository.insertPosTerminalRecord(
+                PosTerminalRecord(
+                    transactionDateTime = cleanDateTime,
+                    transactionTimestamp = parsedTs,
+                    receiptNumber = receiptNumber.trim(),
+                    referenceNumber = referenceNumber.trim(),
+                    approvalNumber = approvalNumber.trim(),
+                    maskedCardNumber = maskedCardNumber.trim(),
+                    operationType = operationType.trim().ifBlank { "COMPRA" },
+                    totalAmount = maxOf(0.0, totalAmount),
+                    currency = if (currency.equals("USD", ignoreCase = true)) "USD" else "VES",
+                    transactionStatus = PosTicketOcrParser.normalizeStatus(transactionStatus),
+                    bankOrTerminal = bankOrTerminal.trim(),
+                    notes = notes.trim(),
+                    rawOcrText = rawOcrText,
+                    registeredBy = registeredUser
+                )
+            )
+            cloudSyncRepository.syncInstantBackend()
+            onSuccess()
+        }
+    }
+
+    fun updatePosTerminalRecord(
+        record: PosTerminalRecord,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val parsedTs = PosTicketOcrParser.parseDateTimeToMillis(record.transactionDateTime)
+                ?: record.transactionTimestamp
+            repository.updatePosTerminalRecord(
+                record.copy(
+                    transactionTimestamp = parsedTs,
+                    transactionStatus = PosTicketOcrParser.normalizeStatus(record.transactionStatus)
+                )
+            )
+            cloudSyncRepository.syncInstantBackend()
+            onSuccess()
+        }
+    }
+
+    fun deletePosTerminalRecord(record: PosTerminalRecord, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.deletePosTerminalRecord(record)
+            cloudSyncRepository.syncInstantBackend()
+            onSuccess()
+        }
+    }
+
     fun getItemsForSale(saleId: Int): kotlinx.coroutines.flow.Flow<List<SaleItem>> {
         return repository.getItemsForSale(saleId)
     }
@@ -1483,6 +1649,8 @@ class PosViewModel(
         allowDecimalQuantity: Boolean = false,
         isPriceModifiable: Boolean = false,
         wholesalePriceUsd: Double = 0.0,
+        minStockAlertQuantity: Double = 5.0,
+        isLowStockAlertEnabled: Boolean = true,
         onError: ((String) -> Unit)? = null,
         onSuccess: (() -> Unit)? = null
     ): Boolean {
@@ -1518,7 +1686,9 @@ class PosViewModel(
                 counterQuantity = counterQuantity,
                 allowDecimalQuantity = allowDecimalQuantity,
                 isPriceModifiable = isPriceModifiable,
-                wholesalePriceUsd = wholesalePriceUsd
+                wholesalePriceUsd = wholesalePriceUsd,
+                minStockAlertQuantity = minStockAlertQuantity.coerceAtLeast(0.0),
+                isLowStockAlertEnabled = if (isRecipe) false else isLowStockAlertEnabled
             )
             repository.insertProduct(product)
             cloudSyncRepository.pushProduct(product)
@@ -1532,6 +1702,19 @@ class PosViewModel(
             repository.updateProduct(product)
             cloudSyncRepository.pushProduct(product)
         }
+    }
+
+    fun setProductStockAlert(
+        product: Product,
+        enabled: Boolean,
+        minQuantity: Double = product.minStockAlertQuantity
+    ) {
+        updateProduct(
+            product.copy(
+                isLowStockAlertEnabled = enabled,
+                minStockAlertQuantity = minQuantity.coerceAtLeast(0.0)
+            )
+        )
     }
 
     fun deleteProduct(product: Product) {
@@ -1618,9 +1801,18 @@ class PosViewModel(
 
     fun updateCartItem(item: CartItem, newQuantity: Double, newPrice: Double? = null) {
         val current = _cart.value.toMutableList()
-        val index = current.indexOfFirst { it === item }
+        var index = current.indexOfFirst { it === item }
+        if (index == -1) {
+            index = current.indexOfFirst {
+                it.product.id == item.product.id && it.customPrice == item.customPrice
+            }
+        }
         if (index != -1) {
-            current[index] = item.copy(quantity = newQuantity, customPrice = newPrice)
+            if (newQuantity <= 0.0) {
+                current.removeAt(index)
+            } else {
+                current[index] = current[index].copy(quantity = newQuantity, customPrice = newPrice)
+            }
             _cart.value = current
         }
     }
@@ -1640,8 +1832,16 @@ class PosViewModel(
 
     fun removeCartItemCompletely(item: CartItem) {
         val current = _cart.value.toMutableList()
-        current.removeIf { it === item }
-        _cart.value = current
+        var index = current.indexOfFirst { it === item }
+        if (index == -1) {
+            index = current.indexOfFirst {
+                it.product.id == item.product.id && it.customPrice == item.customPrice
+            }
+        }
+        if (index != -1) {
+            current.removeAt(index)
+            _cart.value = current
+        }
     }
 
     fun clearCart() {
@@ -2199,18 +2399,104 @@ class PosViewModel(
     fun getItemsForHeldSale(heldSaleId: Int) = repository.getItemsForHeldSale(heldSaleId)
 
     // --- DELIVERY NOTES (NOTAS DE ENTREGA SIN FACTURAR) ---
-    fun processDeliveryNote(
+    fun setDeliveryNoteCurrency(currency: String) {
+        _deliveryNoteCurrency.value = if (currency.equals("BS", ignoreCase = true)) "BS" else "USD"
+    }
+
+    fun addToDeliveryNoteCart(product: Product): Boolean {
+        val current = _deliveryNoteCart.value.toMutableList()
+        val existing = current.find { it.product.id == product.id && it.customPrice == null }
+        val maxAvailable = if (product.isRecipe) 9999.0
+                           else if (product.isCombo) product.calculateAvailableComboStock(allProducts.value).toDouble()
+                           else product.stock
+
+        val totalQtyForProduct = current.filter { it.product.id == product.id }.sumOf { it.quantity }
+
+        return if (product.isRecipe) {
+            if (existing != null) {
+                current[current.indexOf(existing)] = existing.copy(quantity = existing.quantity + 1.0)
+            } else {
+                current.add(CartItem(product, 1.0))
+            }
+            _deliveryNoteCart.value = current
+            true
+        } else if (totalQtyForProduct + 1.0 <= maxAvailable + 0.0001) {
+            if (existing != null) {
+                current[current.indexOf(existing)] = existing.copy(quantity = existing.quantity + 1.0)
+            } else {
+                current.add(CartItem(product, 1.0))
+            }
+            _deliveryNoteCart.value = current
+            true
+        } else {
+            false
+        }
+    }
+
+    fun updateDeliveryNoteCartItem(item: CartItem, newQuantity: Double, newPriceUsd: Double? = null) {
+        val current = _deliveryNoteCart.value.toMutableList()
+        var index = current.indexOfFirst { it === item }
+        if (index == -1) {
+            index = current.indexOfFirst {
+                it.product.id == item.product.id && it.customPrice == item.customPrice
+            }
+        }
+        if (index != -1) {
+            if (newQuantity <= 0.0) {
+                current.removeAt(index)
+            } else {
+                val product = current[index].product
+                val maxAvailable = if (product.isRecipe) 9999.0
+                                   else if (product.isCombo) product.calculateAvailableComboStock(allProducts.value).toDouble()
+                                   else product.stock
+                val otherQty = current.filterIndexed { i, cartItem -> i != index && cartItem.product.id == product.id }
+                    .sumOf { it.quantity }
+                val cappedQty = if (product.isRecipe) newQuantity else newQuantity.coerceAtMost(maxOf(0.0, maxAvailable - otherQty))
+                if (cappedQty <= 0.0) {
+                    current.removeAt(index)
+                } else {
+                    val normalizedPrice = newPriceUsd?.let { p ->
+                        if (kotlin.math.abs(p - product.priceUsd) < 0.0001) null else maxOf(0.0, p)
+                    }
+                    current[index] = current[index].copy(quantity = cappedQty, customPrice = normalizedPrice)
+                }
+            }
+            _deliveryNoteCart.value = current
+        }
+    }
+
+    fun removeFromDeliveryNoteCart(item: CartItem) {
+        val current = _deliveryNoteCart.value.toMutableList()
+        var index = current.indexOfFirst { it === item }
+        if (index == -1) {
+            index = current.indexOfFirst {
+                it.product.id == item.product.id && it.customPrice == item.customPrice
+            }
+        }
+        if (index != -1) {
+            current.removeAt(index)
+            _deliveryNoteCart.value = current
+        }
+    }
+
+    fun clearDeliveryNoteCart() {
+        _deliveryNoteCart.value = emptyList()
+    }
+
+    fun processDedicatedDeliveryNote(
         customerName: String,
         customerDocument: String,
         recipientName: String,
         reasonOrObservation: String,
-        onSuccess: (DeliveryNote) -> Unit
+        displayCurrency: String,
+        onSuccess: (DeliveryNote, List<DeliveryNoteItem>) -> Unit
     ): Boolean {
-        if (_cart.value.isEmpty()) return false
-        val currentCart = _cart.value
+        val currentCart = _deliveryNoteCart.value
+        if (currentCart.isEmpty()) return false
         val rate = if (_bcvRate.value > 0.001) _bcvRate.value else 1.0
-        val totalUsd = currentCart.sumOf { it.product.priceUsd * it.quantity }
+        val totalUsd = currentCart.sumOf { it.effectivePrice * it.quantity }
         val totalBs = totalUsd * rate
+        val currencyNormalized = if (displayCurrency.equals("BS", ignoreCase = true)) "BS" else "USD"
 
         val currentCashier = _currentUser.value?.username ?: "Cajero"
         val currentRegister = prefs.cashRegisterNumber.ifBlank { "01" }
@@ -2222,14 +2508,15 @@ class PosViewModel(
                 customerName = customerName.ifBlank { "Cliente General" },
                 customerDocument = customerDocument.ifBlank { "V-00000000" },
                 recipientName = recipientName.ifBlank { customerName.ifBlank { "Persona Receptora" } },
-                reasonOrObservation = reasonOrObservation.ifBlank { "Despacho de mercancía sin factura fiscal" },
+                reasonOrObservation = reasonOrObservation.ifBlank { "Despacho de mercancía - No válido para crédito fiscal" },
                 timestamp = System.currentTimeMillis(),
                 totalEstimatedUsd = totalUsd,
                 totalEstimatedBs = totalBs,
                 rateBcv = rate,
                 status = "ENTREGADO",
                 cashierName = currentCashier,
-                cashRegisterNumber = currentRegister
+                cashRegisterNumber = currentRegister,
+                displayCurrency = currencyNormalized
             )
             val items = currentCart.map {
                 DeliveryNoteItem(
@@ -2237,7 +2524,60 @@ class PosViewModel(
                     productId = it.product.id,
                     productName = it.product.name,
                     quantity = it.quantity,
-                    priceUsd = it.product.priceUsd
+                    priceUsd = it.effectivePrice
+                )
+            }
+            val id = repository.processDeliveryNote(note, items)
+            val finalNote = note.copy(id = id.toInt())
+            val finalItems = items.map { it.copy(deliveryNoteId = id.toInt()) }
+            clearDeliveryNoteCart()
+            onSuccess(finalNote, finalItems)
+        }
+        return true
+    }
+
+    fun processDeliveryNote(
+        customerName: String,
+        customerDocument: String,
+        recipientName: String,
+        reasonOrObservation: String,
+        displayCurrency: String = "USD",
+        onSuccess: (DeliveryNote) -> Unit
+    ): Boolean {
+        if (_cart.value.isEmpty()) return false
+        val currentCart = _cart.value
+        val rate = if (_bcvRate.value > 0.001) _bcvRate.value else 1.0
+        val totalUsd = currentCart.sumOf { it.effectivePrice * it.quantity }
+        val totalBs = totalUsd * rate
+        val currencyNormalized = if (displayCurrency.equals("BS", ignoreCase = true)) "BS" else "USD"
+
+        val currentCashier = _currentUser.value?.username ?: "Cajero"
+        val currentRegister = prefs.cashRegisterNumber.ifBlank { "01" }
+
+        viewModelScope.launch {
+            val noteNumber = repository.getNextDeliveryNoteNumber()
+            val note = DeliveryNote(
+                noteNumber = noteNumber,
+                customerName = customerName.ifBlank { "Cliente General" },
+                customerDocument = customerDocument.ifBlank { "V-00000000" },
+                recipientName = recipientName.ifBlank { customerName.ifBlank { "Persona Receptora" } },
+                reasonOrObservation = reasonOrObservation.ifBlank { "Despacho de mercancía - No válido para crédito fiscal" },
+                timestamp = System.currentTimeMillis(),
+                totalEstimatedUsd = totalUsd,
+                totalEstimatedBs = totalBs,
+                rateBcv = rate,
+                status = "ENTREGADO",
+                cashierName = currentCashier,
+                cashRegisterNumber = currentRegister,
+                displayCurrency = currencyNormalized
+            )
+            val items = currentCart.map {
+                DeliveryNoteItem(
+                    deliveryNoteId = 0,
+                    productId = it.product.id,
+                    productName = it.product.name,
+                    quantity = it.quantity,
+                    priceUsd = it.effectivePrice
                 )
             }
             val id = repository.processDeliveryNote(note, items)
@@ -2259,6 +2599,7 @@ class PosViewModel(
     fun loadDeliveryNoteToCart(noteId: Int, onSuccess: () -> Unit) {
         viewModelScope.launch {
             val items = repository.getItemsForDeliveryNoteDirect(noteId)
+            val note = allDeliveryNotes.value.find { it.id == noteId }
             val products = repository.allProducts.firstOrNull() ?: emptyList()
             val newCartItems = mutableListOf<CartItem>()
             for (item in items) {
@@ -2271,9 +2612,13 @@ class PosViewModel(
                     stock = 999.0,
                     category = "General"
                 )
-                newCartItems.add(CartItem(prod, item.quantity))
+                val customPrice = if (kotlin.math.abs(item.priceUsd - prod.priceUsd) > 0.001) item.priceUsd else null
+                newCartItems.add(CartItem(prod, item.quantity, customPrice = customPrice))
             }
             _cart.value = newCartItems
+            if (note != null) {
+                _posPrefillCustomer.value = note.customerName to note.customerDocument
+            }
             onSuccess()
         }
     }
@@ -2637,6 +2982,9 @@ class PosViewModel(
         val customers = repository.allCustomers.firstOrNull() ?: emptyList()
         val quotes = repository.allQuotes.firstOrNull() ?: emptyList()
         val sales = repository.allSales.firstOrNull() ?: emptyList()
+        val saleItems = repository.allSaleItems.firstOrNull() ?: emptyList()
+        val expenses = repository.allExpenses.firstOrNull() ?: emptyList()
+        val casheaSettlements = repository.allCasheaSettlements.firstOrNull() ?: emptyList()
         val (todayUsd, todayBs, todayCount) = computeTodaySalesMetrics(sales)
 
         val readOnlyResult = assistantEngine.executeReadOnlyLookup(
@@ -2649,7 +2997,10 @@ class PosViewModel(
             bcvRate = _bcvRate.value,
             todaySalesTotalUsd = todayUsd,
             todaySalesTotalBs = todayBs,
-            todaySalesCount = todayCount
+            todaySalesCount = todayCount,
+            saleItems = saleItems,
+            expenses = expenses,
+            casheaSettlements = casheaSettlements
         )
         if (readOnlyResult != null) {
             return readOnlyResult
@@ -2672,7 +3023,10 @@ class PosViewModel(
             todaySalesTotalUsd = todayUsd,
             todaySalesTotalBs = todayBs,
             todaySalesCount = todayCount,
-            minProfitMarginPercent = effectiveMinMargin
+            minProfitMarginPercent = effectiveMinMargin,
+            saleItems = saleItems,
+            expenses = expenses,
+            casheaSettlements = casheaSettlements
         )
 
         return when (result) {
@@ -2757,6 +3111,9 @@ class PosViewModel(
                 val customers = repository.allCustomers.firstOrNull() ?: emptyList()
                 val quotes = repository.allQuotes.firstOrNull() ?: emptyList()
                 val sales = repository.allSales.firstOrNull() ?: emptyList()
+                val saleItems = repository.allSaleItems.firstOrNull() ?: emptyList()
+                val expenses = repository.allExpenses.firstOrNull() ?: emptyList()
+                val casheaSettlements = repository.allCasheaSettlements.firstOrNull() ?: emptyList()
 
                 val (totalUsd, totalBs, salesCount) = computeTodaySalesMetrics(sales)
                 val currentPending = _pendingAssistantAction.value
@@ -2783,7 +3140,10 @@ class PosViewModel(
                     minProfitMarginPercent = effectiveMinMargin,
                     customers = customers,
                     quotes = quotes,
-                    conversationHistory = historyPairs
+                    conversationHistory = historyPairs,
+                    saleItems = saleItems,
+                    expenses = expenses,
+                    casheaSettlements = casheaSettlements
                 )
 
                 _isAssistantThinking.value = false
@@ -3162,6 +3522,34 @@ class PosViewModel(
                 )
                 return replyText
             }
+            is PendingAssistantAction.UpdateProductPriceAction -> {
+                _pendingAssistantAction.value = null
+                val products = repository.allProducts.firstOrNull() ?: emptyList()
+                val target = products.find { it.id == action.productId }
+                val resolved = _assistantMessages.value.map {
+                    if (it.pendingAction != null && !it.isConfirmedOrResolved) it.copy(isConfirmedOrResolved = true) else it
+                }
+                val replyText = if (target != null) {
+                    val updatedWholesale = action.newWholesaleUsd ?: target.wholesalePriceUsd
+                    updateProduct(
+                        target.copy(
+                            priceUsd = action.newPriceUsd,
+                            wholesalePriceUsd = updatedWholesale
+                        )
+                    )
+                    "✅ **¡Precio Actualizado con Éxito!**\n" +
+                        "• Producto: **${target.name}**\n" +
+                        "• Nuevo Precio: **$${"%.2f".format(Locale.US, action.newPriceUsd)} USD** (Bs. ${"%.2f".format(Locale.US, action.newPriceUsd * _bcvRate.value)})"
+                } else {
+                    "⚠️ No se encontró el producto para actualizar el precio."
+                }
+                _assistantMessages.value = resolved + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = replyText,
+                    isConfirmedOrResolved = true
+                )
+                return replyText
+            }
             is PendingAssistantAction.SelectDisambiguation -> {
                 _pendingAssistantAction.value = null
                 return "Selección cerrada."
@@ -3175,6 +3563,7 @@ class PosViewModel(
     }
 
     fun clearAssistantChat() {
+        assistantEngine.resetContext()
         _assistantMessages.value = listOf(
             AssistantChatMessage(
                 sender = AssistantSender.ASSISTANT,
@@ -3191,6 +3580,222 @@ class PosViewModel(
         )
     }
 
+    suspend fun scanPurchaseInvoiceImage(context: Context, imageUri: Uri): Result<ParsedInvoiceOcrResult> {
+        val products = repository.allProducts.firstOrNull().orEmpty()
+        val suppliers = repository.allSuppliers.firstOrNull().orEmpty()
+        return PurchaseInvoiceOcrScanner.scanAndExtractInvoice(
+            context = context,
+            imageUri = imageUri,
+            geminiRepository = geminiRepository,
+            existingProducts = products,
+            existingSuppliers = suppliers
+        )
+    }
+
+    suspend fun reparsePurchaseInvoiceText(rawText: String): ParsedInvoiceOcrResult {
+        val products = repository.allProducts.firstOrNull().orEmpty()
+        val suppliers = repository.allSuppliers.firstOrNull().orEmpty()
+        return PurchaseInvoiceOcrParser.parseFromRawText(
+            rawText = rawText,
+            existingProducts = products,
+            existingSuppliers = suppliers
+        )
+    }
+
+    fun importScannedPurchaseInvoice(
+        supplierName: String,
+        invoiceNumber: String,
+        totalAmountUsd: Double,
+        items: List<ExtractedInvoiceItem>,
+        subtotalUsd: Double = 0.0,
+        taxAmountUsd: Double = 0.0,
+        ivaPercent: Double = 0.0,
+        applyIvaToProductCost: Boolean = false,
+        currencyLabel: String = "USD",
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val cleanSupplierName = supplierName.trim()
+                val cleanInvoiceNumber = invoiceNumber.trim().ifBlank {
+                    "FAC-${System.currentTimeMillis() % 100000}"
+                }
+                val validItems = items.filter { it.name.isNotBlank() && it.quantity > 0.0 }
+                if (validItems.isEmpty()) {
+                    onResult(false, "Agrega al menos un producto válido para procesar la factura.")
+                    return@launch
+                }
+
+                // 1. Resolver o crear proveedor para asociar la factura de compra
+                val existingSuppliers = repository.allSuppliers.firstOrNull().orEmpty()
+                val matchedSupplier = if (cleanSupplierName.isNotBlank()) {
+                    val normTarget = PurchaseInvoiceOcrParser.normalizeText(cleanSupplierName)
+                    existingSuppliers.firstOrNull {
+                        PurchaseInvoiceOcrParser.normalizeText(it.name) == normTarget
+                    } ?: existingSuppliers.firstOrNull {
+                        val sNorm = PurchaseInvoiceOcrParser.normalizeText(it.name)
+                        sNorm.length >= 4 && (normTarget.contains(sNorm) || sNorm.contains(normTarget))
+                    }
+                } else null
+
+                val resolvedSupplierId: Int = when {
+                    matchedSupplier != null -> matchedSupplier.id
+                    cleanSupplierName.isNotBlank() -> {
+                        repository.insertSupplierAndGetId(
+                            Supplier(
+                                name = cleanSupplierName,
+                                documentId = "",
+                                phone = "",
+                                address = ""
+                            )
+                        ).toInt()
+                    }
+                    else -> 0
+                }
+
+                // 2. Actualizar productos existentes (sumar stock + modificar costo SOLO si el nuevo es MAYOR) o crear nuevos
+                val currentProducts = repository.allProducts.firstOrNull().orEmpty().toMutableList()
+                var existingUpdatedCount = 0
+                var costRaisedCount = 0
+                var costKeptCount = 0
+                var newCreatedCount = 0
+                var skippedLicenseCount = 0
+                val maxAllowed = getMaxProductsAllowed()
+
+                val minMarginEnabled = _isMinProfitMarginEnabled.value
+                val minMarginPct = _minProfitMarginPercent.value
+                val hasIva = taxAmountUsd > 0.0 || ivaPercent > 0.0
+
+                for (item in validItems) {
+                    val existing = PurchaseInvoiceOcrParser.findBestMatchingProduct(item.name, currentProducts)
+                        ?: item.matchedProductId?.let { id -> currentProducts.firstOrNull { it.id == id } }
+
+                    val incomingUnitCostUsd = item.effectiveUnitCostUsd(
+                        applyIva = hasIva,
+                        ivaPercent = ivaPercent,
+                        includeIvaInCost = applyIvaToProductCost
+                    )
+
+                    if (existing != null) {
+                        val newStock = existing.stock + item.quantity
+                        val newCost = PurchaseInvoiceOcrParser.computeUpdatedCost(
+                            existingCostUsd = existing.costPriceUsd,
+                            incomingUnitCostUsd = incomingUnitCostUsd,
+                            isExisting = true
+                        )
+                        if (newCost > existing.costPriceUsd + 0.0001) {
+                            costRaisedCount++
+                        } else if (incomingUnitCostUsd > 0.0) {
+                            costKeptCount++
+                        }
+                        val updatedSalePrice = if (item.salePriceUsd > 0.0) {
+                            item.salePriceUsd
+                        } else {
+                            existing.priceUsd
+                        }
+
+                        val updatedProduct = existing.copy(
+                            stock = if (existing.isRecipe || existing.isCombo) existing.stock else newStock,
+                            costPriceUsd = if (existing.isRecipe || existing.isCombo) existing.costPriceUsd else newCost,
+                            priceUsd = updatedSalePrice,
+                            invoiceNumber = cleanInvoiceNumber
+                        )
+                        repository.updateProduct(updatedProduct)
+                        cloudSyncRepository.pushProduct(updatedProduct)
+
+                        val idx = currentProducts.indexOfFirst { it.id == existing.id }
+                        if (idx >= 0) currentProducts[idx] = updatedProduct
+                        existingUpdatedCount++
+                    } else {
+                        if (currentProducts.size >= maxAllowed) {
+                            skippedLicenseCount++
+                            continue
+                        }
+
+                        val resolvedSalePrice = when {
+                            item.salePriceUsd > 0.0 -> item.salePriceUsd
+                            minMarginEnabled && minMarginPct > 0.0 && incomingUnitCostUsd > 0.0 -> {
+                                ((incomingUnitCostUsd * (1.0 + minMarginPct / 100.0)) * 100.0).toInt() / 100.0
+                            }
+                            else -> 0.0
+                        }
+
+                        val generatedCode = "FAC-${(System.currentTimeMillis() % 1000000)}-${newCreatedCount + 1}"
+                        val newProduct = Product(
+                            code = generatedCode,
+                            name = item.name.trim(),
+                            category = "General",
+                            priceUsd = resolvedSalePrice,
+                            stock = item.quantity,
+                            costPriceUsd = incomingUnitCostUsd.coerceAtLeast(0.0),
+                            invoiceNumber = cleanInvoiceNumber,
+                            isTaxExempt = item.isTaxExempt
+                        )
+                        repository.insertProduct(newProduct)
+                        cloudSyncRepository.pushProduct(newProduct)
+                        currentProducts.add(newProduct)
+                        newCreatedCount++
+                    }
+                }
+
+                // 3. Registrar la factura de compra en el módulo de Facturas de Proveedores
+                val computedSubtotal = if (subtotalUsd > 0.0) subtotalUsd else validItems.sumOf { it.lineTotalUsd }
+                val computedTax = maxOf(0.0, taxAmountUsd)
+                val computedTotal = if (totalAmountUsd > 0.0) {
+                    totalAmountUsd
+                } else {
+                    computedSubtotal + computedTax
+                }
+                val descriptionDetail = buildString {
+                    append("Escaneo OCR [$currencyLabel] (${validItems.size} ítem(s)): ")
+                    append(validItems.take(5).joinToString(", ") { "${it.name} x${it.quantity}" })
+                    if (validItems.size > 5) append("...")
+                }
+
+                val purchaseInvoice = PurchaseInvoice(
+                    supplierId = resolvedSupplierId,
+                    invoiceNumber = cleanInvoiceNumber,
+                    timestamp = System.currentTimeMillis(),
+                    totalAmount = computedTotal,
+                    description = descriptionDetail,
+                    subtotalUsd = computedSubtotal,
+                    taxAmountUsd = computedTax
+                )
+                repository.insertPurchaseInvoice(purchaseInvoice)
+                cloudSyncRepository.pushPurchaseInvoice(purchaseInvoice)
+                cloudSyncRepository.syncInstantBackend()
+
+                val summaryMsg = buildString {
+                    appendLine("🧾 **Factura Escaneada y Cargada al Inventario**")
+                    appendLine("• Proveedor: **${cleanSupplierName.ifBlank { "Sin especificar" }}**")
+                    appendLine("• N° Factura: **$cleanInvoiceNumber** ($currencyLabel)")
+                    if (computedTax > 0.0) {
+                        appendLine("• Base: **$${"%.2f".format(Locale.US, computedSubtotal)}** + IVA (${"%.1f".format(Locale.US, ivaPercent)}%): **$${"%.2f".format(Locale.US, computedTax)} USD**")
+                    }
+                    appendLine("• Total Factura: **$${"%.2f".format(Locale.US, computedTotal)} USD**")
+                    if (existingUpdatedCount > 0) {
+                        appendLine("• Existentes sumados al stock: **$existingUpdatedCount** (costo subido: $costRaisedCount, costo mantenido por ser ≤ actual: $costKeptCount)")
+                    }
+                    if (newCreatedCount > 0) {
+                        appendLine("• Productos nuevos creados: **$newCreatedCount**")
+                    }
+                    if (skippedLicenseCount > 0) {
+                        appendLine("• Omitidos por límite de licencia: **$skippedLicenseCount**")
+                    }
+                }.trim()
+
+                _assistantMessages.value = _assistantMessages.value + AssistantChatMessage(
+                    sender = AssistantSender.ASSISTANT,
+                    text = summaryMsg,
+                    isConfirmedOrResolved = true
+                )
+                onResult(true, summaryMsg)
+            } catch (e: Exception) {
+                onResult(false, e.localizedMessage ?: "Error al guardar la factura escaneada.")
+            }
+        }
+    }
+
     // --- GEMINI API KEY & MODEL SETTINGS ---
 
     fun setGeminiLearningAiEnabled(enabled: Boolean) {
@@ -3205,7 +3810,7 @@ class PosViewModel(
     }
 
     fun setGeminiSelectedModel(model: String) {
-        val cleanModel = model.trim().ifBlank { "gemini-2.5-flash" }
+        val cleanModel = model.trim().ifBlank { "gemini-3.5-flash-lite" }
         prefs.geminiSelectedModel = cleanModel
         _geminiSelectedModel.value = cleanModel
     }
@@ -3264,6 +3869,46 @@ class PosViewModel(
                 cloudSyncRepository.syncInstantBackend()
             }
             onResult(result)
+        }
+    }
+
+    fun backupEncryptedJsonToFirebaseNow(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val res = firestoreSyncRepository.uploadEncryptedJsonBackup(skipIfLocalEmptyAndRemoteExists = false)
+            res.fold(
+                onSuccess = { msg -> onResult(true, msg) },
+                onFailure = { err -> onResult(false, err.localizedMessage ?: "Error al respaldar en Firebase.") }
+            )
+        }
+    }
+
+    fun restoreGoogleFirebaseBackupAndSync(
+        appendMode: Boolean = false,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = firestoreSyncRepository.restoreEncryptedJsonBackupAndSync(appendMode = appendMode)
+            res.fold(
+                onSuccess = { importRes ->
+                    _storeName.value = prefs.storeName
+                    _storeRif.value = prefs.storeRif
+                    _storePhone.value = prefs.storePhone
+                    _storeAddress.value = prefs.storeAddress
+                    _companyRegisteredAt.value = prefs.companyRegisteredAt
+                    _companyGoogleAccount.value = prefs.companyGoogleAccount
+                    _isCompanyRegistered.value = prefs.isCompanyRegistered
+                    if (prefs.lastBcvRate > 0f) {
+                        _bcvRate.value = prefs.lastBcvRate.toDouble()
+                    }
+                    if (prefs.isCloudConnected || cloudSyncRepository.isConfigured()) {
+                        cloudSyncRepository.syncInstantBackend()
+                    }
+                    onResult(true, importRes.message)
+                },
+                onFailure = { err ->
+                    onResult(false, err.localizedMessage ?: "No se pudo recuperar el respaldo de Google.")
+                }
+            )
         }
     }
 }

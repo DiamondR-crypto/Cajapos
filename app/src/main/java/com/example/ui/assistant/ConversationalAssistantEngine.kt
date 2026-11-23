@@ -1,19 +1,30 @@
 package com.example.ui.assistant
 
+import com.example.data.local.CasheaSettlement
 import com.example.data.local.Customer
+import com.example.data.local.Expense
 import com.example.data.local.Product
 import com.example.data.local.Quote
 import com.example.data.local.Sale
+import com.example.data.local.SaleItem
 import com.example.data.local.Supplier
 import com.example.data.repository.AssistantApiResponse
 import com.example.data.repository.GeminiRepository
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
 class ConversationalAssistantEngine(
     private val geminiRepository: GeminiRepository
 ) {
+
+    // Preserves numbered invoices returned by the latest date summary for conversational follow-up
+    private var lastQueriedInvoices: List<Sale> = emptyList()
+
+    fun resetContext() {
+        lastQueriedInvoices = emptyList()
+    }
 
     /**
      * Attempts to resolve user message locally first (fast path + real-time draft corrections).
@@ -32,7 +43,10 @@ class ConversationalAssistantEngine(
         minProfitMarginPercent: Double? = null,
         customers: List<Customer> = emptyList(),
         quotes: List<Quote> = emptyList(),
-        conversationHistory: List<Pair<String, String>> = emptyList()
+        conversationHistory: List<Pair<String, String>> = emptyList(),
+        saleItems: List<SaleItem> = emptyList(),
+        expenses: List<Expense> = emptyList(),
+        casheaSettlements: List<CasheaSettlement> = emptyList()
     ): ProcessResult {
         val trimmed = rawText.trim()
         val lower = trimmed.lowercase(Locale.ROOT)
@@ -188,7 +202,57 @@ class ConversationalAssistantEngine(
             return ProcessResult.ProposeAction(action, text)
         }
 
-        // 16. Local Fast Intent - Register Supplier Purchase Invoice
+        // 16. Local Fast Intent - Last Invoice Detail
+        if (isLastInvoiceIntent(lower)) {
+            return buildLastInvoiceDetailReply(sales, saleItems, bcvRate)
+        }
+
+        // 17. Local Fast Intent - Invoices Summary by Date or Range
+        val invoicesByDateMatch = tryParseInvoicesByDateLocal(trimmed, lower, sales, bcvRate)
+        if (invoicesByDateMatch != null) {
+            return invoicesByDateMatch
+        }
+
+        // 18. Local Fast Intent - Specific Invoice Query by Number
+        val invoiceQueryMatch = tryParseInvoiceQueryLocal(trimmed, sales, saleItems, bcvRate)
+        if (invoiceQueryMatch != null) {
+            return invoiceQueryMatch
+        }
+
+        // 19. Local Fast Intent - Follow-Up Inspection of Listed Invoice (e.g. "la 1", "la segunda", "la de María")
+        val followUpInvoiceMatch = tryParseFollowUpInvoiceLocal(trimmed, lower, saleItems, bcvRate)
+        if (followUpInvoiceMatch != null) {
+            return followUpInvoiceMatch
+        }
+
+        // 20. Local Fast Intent - Cashea Status / Debt / Commissions
+        if (isCasheaQueryIntent(lower)) {
+            return buildCasheaStatusReply(sales, casheaSettlements, bcvRate)
+        }
+
+        // 21. Local Fast Intent - Accounts Receivable / Pending Credits
+        if (isPendingCreditsIntent(lower)) {
+            return buildPendingCreditsReply(sales, bcvRate)
+        }
+
+        // 22. Local Fast Intent - Expenses Summary
+        val expensesSummaryMatch = tryParseExpensesSummaryLocal(lower, expenses, bcvRate)
+        if (expensesSummaryMatch != null) {
+            return expensesSummaryMatch
+        }
+
+        // 23. Local Fast Intent - Inventory Valuation & Summary
+        if (isInventoryValuationIntent(lower)) {
+            return buildInventoryValuationReply(products, bcvRate)
+        }
+
+        // 24. Local Fast Intent - Quick Product Price Update
+        val updatePriceMatch = tryParseUpdateProductPriceLocal(trimmed, products, bcvRate)
+        if (updatePriceMatch != null) {
+            return updatePriceMatch
+        }
+
+        // 25. Local Fast Intent - Register Supplier Purchase Invoice
         val purchaseInvoiceMatch = tryParsePurchaseInvoiceLocal(trimmed, suppliers)
         if (purchaseInvoiceMatch != null) {
             val action = PendingAssistantAction.CreatePurchaseInvoiceAction(
@@ -207,19 +271,13 @@ class ConversationalAssistantEngine(
             return ProcessResult.ProposeAction(action, text)
         }
 
-        // 17. Local Fast Intent - Simple Inventory / Price Query
+        // 26. Local Fast Intent - Simple Inventory / Price Query
         val queryMatch = tryParseInventoryQueryLocal(trimmed, products, bcvRate)
         if (queryMatch != null) {
             return queryMatch
         }
 
-        // 18. Local Fast Intent - Invoice Query
-        val invoiceQueryMatch = tryParseInvoiceQueryLocal(trimmed, sales)
-        if (invoiceQueryMatch != null) {
-            return invoiceQueryMatch
-        }
-
-        // 19. Delegate to Gemini AI with multi-step read-only reasoning + action tools
+        // 27. Delegate to Gemini AI with multi-step read-only reasoning + action tools
         val catalogSummary = buildCatalogSummary(products)
         val suppliersSummary = buildSuppliersSummary(suppliers)
         val customersSummary = buildCustomersSummary(customers)
@@ -247,7 +305,10 @@ class ConversationalAssistantEngine(
                     bcvRate = bcvRate,
                     todaySalesTotalUsd = todaySalesTotalUsd,
                     todaySalesTotalBs = todaySalesTotalBs,
-                    todaySalesCount = todaySalesCount
+                    todaySalesCount = todaySalesCount,
+                    saleItems = saleItems,
+                    expenses = expenses,
+                    casheaSettlements = casheaSettlements
                 )
             }
         )
@@ -269,7 +330,10 @@ class ConversationalAssistantEngine(
                     todaySalesTotalUsd = todaySalesTotalUsd,
                     todaySalesTotalBs = todaySalesTotalBs,
                     todaySalesCount = todaySalesCount,
-                    minProfitMarginPercent = minProfitMarginPercent
+                    minProfitMarginPercent = minProfitMarginPercent,
+                    saleItems = saleItems,
+                    expenses = expenses,
+                    casheaSettlements = casheaSettlements
                 )
             }
         }
@@ -289,7 +353,10 @@ class ConversationalAssistantEngine(
         bcvRate: Double,
         todaySalesTotalUsd: Double,
         todaySalesTotalBs: Double,
-        todaySalesCount: Int
+        todaySalesCount: Int,
+        saleItems: List<SaleItem> = emptyList(),
+        expenses: List<Expense> = emptyList(),
+        casheaSettlements: List<CasheaSettlement> = emptyList()
     ): Map<String, Any>? {
         return when (name) {
             "queryInventory" -> {
@@ -369,22 +436,124 @@ class ConversationalAssistantEngine(
                 )
             }
             "queryInvoice" -> {
-                val invNum = (args["invoiceNumber"] as? String).orEmpty()
+                val invNum = (args["invoiceNumber"] as? String).orEmpty().trim().removePrefix("#")
                 val invoice = sales.find {
                     it.id.toString() == invNum || it.withholdingVoucherNumber.contains(invNum, ignoreCase = true)
                 }
                 if (invoice == null) {
                     mapOf("found" to false, "message" to "No se encontró la factura $invNum")
                 } else {
-                    mapOf(
-                        "found" to true,
-                        "id" to invoice.id,
-                        "customerName" to invoice.customerName,
-                        "customerDocument" to invoice.customerDocument,
-                        "totalUsd" to invoice.totalUsd,
-                        "totalBs" to invoice.totalBs
-                    )
+                    lastQueriedInvoices = listOf(invoice)
+                    saleToLookupMap(invoice, saleItems)
                 }
+            }
+            "getLastInvoiceDetail" -> {
+                val invoice = sales.maxWithOrNull(compareBy<Sale> { it.timestamp }.thenBy { it.id })
+                if (invoice == null) {
+                    mapOf("found" to false, "message" to "No hay facturas de venta registradas aún.")
+                } else {
+                    lastQueriedInvoices = listOf(invoice)
+                    saleToLookupMap(invoice, saleItems)
+                }
+            }
+            "queryInvoicesByDate" -> {
+                val periodArg = (args["period"] as? String).orEmpty().trim()
+                val startArg = (args["startDate"] as? String).orEmpty().trim()
+                val endArg = (args["endDate"] as? String).orEmpty().trim()
+                val range = resolveDateRangeFromArgs(periodArg, startArg, endArg)
+                val filtered = sales
+                    .filter { it.timestamp in range.startMillis..range.endMillis }
+                    .sortedByDescending { it.timestamp }
+                lastQueriedInvoices = filtered.take(20)
+                val timeFmt = SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault())
+                mapOf(
+                    "periodLabel" to range.label,
+                    "count" to filtered.size,
+                    "totalUsd" to filtered.sumOf { it.totalUsd },
+                    "totalBs" to filtered.sumOf { it.totalBs },
+                    "invoices" to filtered.take(15).mapIndexed { index, sale ->
+                        mapOf(
+                            "position" to (index + 1),
+                            "id" to sale.id,
+                            "date" to timeFmt.format(Date(sale.timestamp)),
+                            "customerName" to sale.customerName,
+                            "totalUsd" to sale.totalUsd,
+                            "totalBs" to sale.totalBs,
+                            "paymentSummary" to buildPaymentSummaryShort(sale)
+                        )
+                    }
+                )
+            }
+            "inspectListedInvoice" -> {
+                val reference = (args["reference"] as? String).orEmpty().trim()
+                val chosen = resolveFollowUpInvoiceFromList(reference, lastQueriedInvoices)
+                if (chosen == null) {
+                    mapOf("found" to false, "message" to "No encontré esa factura en el resumen anterior.")
+                } else {
+                    saleToLookupMap(chosen, saleItems)
+                }
+            }
+            "queryCasheaStatus" -> {
+                val totalCasheaUsd = sales.sumOf { it.paymentCasheaUsd }
+                val settledGrossUsd = casheaSettlements.sumOf { it.grossAmountUsd }
+                val pendingDebtUsd = maxOf(0.0, totalCasheaUsd - settledGrossUsd)
+                val commissionsUsd = casheaSettlements.sumOf { it.commissionAmountUsd }
+                val netReceivedUsd = casheaSettlements.sumOf { it.netReceivedUsd }
+                mapOf(
+                    "totalCasheaSalesUsd" to totalCasheaUsd,
+                    "totalSettledGrossUsd" to settledGrossUsd,
+                    "pendingDebtUsd" to pendingDebtUsd,
+                    "commissionsDeductedUsd" to commissionsUsd,
+                    "netReceivedUsd" to netReceivedUsd,
+                    "settlementsCount" to casheaSettlements.size
+                )
+            }
+            "queryPendingCredits" -> {
+                val unpaid = sales.filter { it.paymentCreditUsd > 0.0 && !it.isCreditPaid }
+                val totalOwed = unpaid.sumOf { maxOf(0.0, it.paymentCreditUsd - it.creditPaidAmountUsd) }
+                mapOf(
+                    "count" to unpaid.size,
+                    "totalPendingUsd" to totalOwed,
+                    "credits" to unpaid.take(15).map {
+                        mapOf(
+                            "invoiceId" to it.id,
+                            "customerName" to it.customerName,
+                            "pendingUsd" to maxOf(0.0, it.paymentCreditUsd - it.creditPaidAmountUsd)
+                        )
+                    }
+                )
+            }
+            "queryExpensesSummary" -> {
+                val period = (args["period"] as? String).orEmpty().lowercase(Locale.ROOT).ifBlank { "hoy" }
+                val range = when {
+                    period.contains("mes") -> currentMonthRange()
+                    period.contains("todo") -> DateRangeResult(0L, Long.MAX_VALUE, "Histórico Total")
+                    else -> todayRange()
+                }
+                val filtered = expenses.filter { it.timestamp in range.startMillis..range.endMillis }
+                mapOf(
+                    "periodLabel" to range.label,
+                    "count" to filtered.size,
+                    "totalUsd" to filtered.sumOf { it.amountUsd },
+                    "byCategory" to filtered.groupBy { it.category }.mapValues { (_, list) -> list.sumOf { it.amountUsd } }
+                )
+            }
+            "getInventoryValuation" -> {
+                val physical = products.filter { !it.isRecipe }
+                val totalUnits = physical.sumOf { maxOf(0.0, it.stock) }
+                val costValue = physical.sumOf { maxOf(0.0, it.stock) * it.costPriceUsd }
+                val retailValue = physical.sumOf { maxOf(0.0, it.stock) * it.priceUsd }
+                val outOfStock = physical.count { it.isOutOfStockAlertTriggered(products) }
+                val lowStock = physical.count { it.isLowStockAlertTriggered(products) && !it.isOutOfStockAlertTriggered(products) }
+                mapOf(
+                    "totalProducts" to products.size,
+                    "totalUnits" to totalUnits,
+                    "costValuationUsd" to costValue,
+                    "retailValuationUsd" to retailValue,
+                    "projectedProfitUsd" to (retailValue - costValue),
+                    "outOfStockCount" to outOfStock,
+                    "lowStockCount" to lowStock
+                )
             }
             "checkBcvRate" -> mapOf("bcvRateBs" to bcvRate)
             "getDailySummary" -> mapOf(
@@ -412,7 +581,10 @@ class ConversationalAssistantEngine(
         todaySalesTotalUsd: Double = 0.0,
         todaySalesTotalBs: Double = 0.0,
         todaySalesCount: Int = 0,
-        minProfitMarginPercent: Double? = null
+        minProfitMarginPercent: Double? = null,
+        saleItems: List<SaleItem> = emptyList(),
+        expenses: List<Expense> = emptyList(),
+        casheaSettlements: List<CasheaSettlement> = emptyList()
     ): ProcessResult {
         return when (name) {
             "queryInventory" -> {
@@ -741,7 +913,42 @@ class ConversationalAssistantEngine(
             }
             "queryInvoice" -> {
                 val invNum = (args["invoiceNumber"] as? String).orEmpty()
-                handleInvoiceQuery(invNum, sales)
+                handleInvoiceQuery(invNum, sales, saleItems, bcvRate)
+            }
+            "getLastInvoiceDetail" -> buildLastInvoiceDetailReply(sales, saleItems, bcvRate)
+            "queryInvoicesByDate" -> {
+                val periodArg = (args["period"] as? String).orEmpty().trim()
+                val startArg = (args["startDate"] as? String).orEmpty().trim()
+                val endArg = (args["endDate"] as? String).orEmpty().trim()
+                val range = resolveDateRangeFromArgs(periodArg, startArg, endArg)
+                buildInvoicesByDateReply(sales, range, bcvRate)
+            }
+            "inspectListedInvoice" -> {
+                val reference = (args["reference"] as? String).orEmpty().trim()
+                val chosen = resolveFollowUpInvoiceFromList(reference, lastQueriedInvoices)
+                if (chosen == null) {
+                    ProcessResult.DirectReply("No encontré esa factura en el listado anterior. Dime el número de factura o solicita primero un resumen por fecha.")
+                } else {
+                    ProcessResult.DirectReply(formatInvoiceDetail(chosen, saleItems, bcvRate))
+                }
+            }
+            "queryCasheaStatus" -> buildCasheaStatusReply(sales, casheaSettlements, bcvRate)
+            "queryPendingCredits" -> buildPendingCreditsReply(sales, bcvRate)
+            "queryExpensesSummary" -> {
+                val period = (args["period"] as? String).orEmpty().lowercase(Locale.ROOT).ifBlank { "hoy" }
+                val range = when {
+                    period.contains("mes") -> currentMonthRange()
+                    period.contains("todo") -> DateRangeResult(0L, Long.MAX_VALUE, "Histórico Total")
+                    else -> todayRange()
+                }
+                buildExpensesSummaryReply(expenses, range, bcvRate)
+            }
+            "getInventoryValuation" -> buildInventoryValuationReply(products, bcvRate)
+            "updateProductPrice" -> {
+                val pName = (args["productName"] as? String).orEmpty().trim()
+                val newPrice = (args["newPriceUsd"] as? Number)?.toDouble() ?: 0.0
+                val newWholesale = (args["newWholesaleUsd"] as? Number)?.toDouble()
+                proposeUpdateProductPrice(pName, newPrice, newWholesale, products, bcvRate)
             }
             "getDailySummary" -> handleDailySummary(todaySalesTotalUsd, todaySalesTotalBs, todaySalesCount)
             "confirmCurrentAction" -> {
@@ -761,7 +968,7 @@ class ConversationalAssistantEngine(
             "navigateToModule" -> {
                 val rawMod = (args["module"] as? String).orEmpty().trim().lowercase(Locale.ROOT)
                 val route = mapModuleToRoute(rawMod)
-                    ?: return ProcessResult.DirectReply("No reconocí el módulo '$rawMod'. Módulos disponibles: Facturación, Presupuestos, Inventario, Facturas, Gastos, Resumen, Clientes, Proveedores y Ajustes.")
+                    ?: return ProcessResult.DirectReply("No reconocí el módulo '$rawMod'. Módulos disponibles: Facturación, Presupuestos, Inventario, Facturas, Cashea, Gastos, Resumen, Clientes, Proveedores y Ajustes.")
                 ProcessResult.Navigate(route, "🚀 Abriendo el módulo de **${routeDisplayName(route)}**.")
             }
             else -> ProcessResult.DirectReply("No entendí tu solicitud, puedes repetirla de otra forma.")
@@ -1257,13 +1464,14 @@ class ConversationalAssistantEngine(
     }
 
     private fun buildLowStockReply(products: List<Product>): ProcessResult {
-        val lowStockProducts = products.filter { !it.isRecipe && it.stock <= 5 }
+        val lowStockProducts = products.filter { it.isLowStockAlertTriggered(products) }
         val text = if (lowStockProducts.isEmpty()) {
-            "✅ Todo el inventario se encuentra en niveles óptimos (ningún producto con 5 o menos existencias)."
+            "✅ Todo el inventario importante se encuentra en niveles óptimos según el mínimo definido por producto."
         } else {
-            val sb = StringBuilder("⚠️ **Productos con Existencias Críticas (<= 5):**\n")
+            val sb = StringBuilder("⚠️ **Productos en Stock Mínimo o Agotados:**\n")
             lowStockProducts.take(10).forEach { p ->
-                sb.append("• **${p.name}**: ${p.stock} uds (Precio: $${"%.2f".format(Locale.US, p.priceUsd)})\n")
+                val eff = p.effectiveStockForAlert(products)
+                sb.append("• **${p.name}**: $eff uds (Mín: ${p.minStockAlertQuantity} • Precio: $${"%.2f".format(Locale.US, p.priceUsd)})\n")
             }
             if (lowStockProducts.size > 10) {
                 sb.append("... y ${lowStockProducts.size - 10} productos más en inventario.")
@@ -1273,27 +1481,20 @@ class ConversationalAssistantEngine(
         return ProcessResult.DirectReply(text)
     }
 
-    private fun handleInvoiceQuery(invNum: String, sales: List<Sale>): ProcessResult {
-        if (invNum.isBlank()) return ProcessResult.DirectReply("Por favor, indica el número de factura que deseas consultar.")
-        val invoice = sales.find { it.id.toString() == invNum || it.withholdingVoucherNumber.contains(invNum, ignoreCase = true) }
-        if (invoice == null) return ProcessResult.DirectReply("No encontré ninguna factura con el número '$invNum'.")
+    private fun handleInvoiceQuery(
+        invNum: String,
+        sales: List<Sale>,
+        saleItems: List<SaleItem>,
+        bcvRate: Double
+    ): ProcessResult {
+        val cleanNum = invNum.trim().removePrefix("#")
+        if (cleanNum.isBlank()) return ProcessResult.DirectReply("Por favor, indica el número de factura que deseas consultar.")
+        val invoice = sales.find {
+            it.id.toString() == cleanNum || it.withholdingVoucherNumber.contains(cleanNum, ignoreCase = true)
+        } ?: return ProcessResult.DirectReply("No encontré ninguna factura con el número '$cleanNum'.")
 
-        val date = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(invoice.timestamp))
-
-        val methods = mutableListOf<String>()
-        if (invoice.paymentCashUsd > 0) methods.add("Efectivo ($${invoice.paymentCashUsd})")
-        if (invoice.paymentMobileBs > 0) methods.add("Pago Móvil (Bs. ${invoice.paymentMobileBs})")
-        if (invoice.paymentCardBs > 0) methods.add("Punto/Tarjeta (Bs. ${invoice.paymentCardBs})")
-        if (invoice.paymentCasheaUsd > 0) methods.add("Cashea ($${invoice.paymentCasheaUsd})")
-        if (invoice.paymentCreditUsd > 0) methods.add("Crédito ($${invoice.paymentCreditUsd})")
-
-        val text = "🧾 **Factura Encontrada:**\n" +
-            "• N° Factura: **${invoice.id}**\n" +
-            "• Fecha: $date\n" +
-            "• Cliente: **${invoice.customerName}** (${invoice.customerDocument})\n" +
-            "• Total: **$${"%.2f".format(Locale.US, invoice.totalUsd)} USD** / Bs. ${"%.2f".format(Locale.US, invoice.totalBs)}\n" +
-            "• Métodos de Pago: ${methods.joinToString(", ")}"
-        return ProcessResult.DirectReply(text)
+        lastQueriedInvoices = listOf(invoice)
+        return ProcessResult.DirectReply(formatInvoiceDetail(invoice, saleItems, bcvRate))
     }
 
     private fun handleDailySummary(totalUsd: Double, totalBs: Double, count: Int): ProcessResult {
@@ -1305,13 +1506,575 @@ class ConversationalAssistantEngine(
         return ProcessResult.DirectReply(text)
     }
 
-    private fun tryParseInvoiceQueryLocal(text: String, sales: List<Sale>): ProcessResult? {
+    private fun tryParseInvoiceQueryLocal(
+        text: String,
+        sales: List<Sale>,
+        saleItems: List<SaleItem>,
+        bcvRate: Double
+    ): ProcessResult? {
         val lower = text.lowercase(Locale.ROOT)
-        if (!lower.contains("factura") || (!lower.contains("número") && !lower.contains("numero") && !lower.contains("consulta"))) return null
+        if (!lower.contains("factura")) return null
+        val isLookup = lower.contains("número") || lower.contains("numero") ||
+            lower.contains("consulta") || lower.contains("detalle") ||
+            lower.contains("ver ") || lower.contains("#") ||
+            Regex("factura\\s+(?:nro|num|#)?\\s*\\d+", RegexOption.IGNORE_CASE).containsMatchIn(lower)
+        if (!isLookup) return null
 
-        val numMatch = Regex("(?:número|numero|factura|nro)\\s*(?:es|de|:)?\\s*([a-z0-9\\-]+)", RegexOption.IGNORE_CASE).find(lower)
+        val numMatch = Regex("(?:n[uú]mero|nro|num|factura)\\s*(?:es|de|:|#)?\\s*#?([0-9]+)\\b", RegexOption.IGNORE_CASE).find(lower)
+            ?: Regex("#([0-9]+)\\b").find(lower)
         val invNum = numMatch?.groupValues?.get(1)?.trim() ?: return null
-        return handleInvoiceQuery(invNum, sales)
+        return handleInvoiceQuery(invNum, sales, saleItems, bcvRate)
+    }
+
+    private fun isLastInvoiceIntent(lower: String): Boolean {
+        val hasLastKeyword = lower.contains("última") || lower.contains("ultima") || lower.contains("más reciente") || lower.contains("mas reciente")
+        val hasInvoiceKeyword = lower.contains("factura") || lower.contains("venta") || lower.contains("ticket")
+        return hasLastKeyword && hasInvoiceKeyword
+    }
+
+    private fun buildLastInvoiceDetailReply(
+        sales: List<Sale>,
+        saleItems: List<SaleItem>,
+        bcvRate: Double
+    ): ProcessResult {
+        val latest = sales.maxWithOrNull(compareBy<Sale> { it.timestamp }.thenBy { it.id })
+            ?: return ProcessResult.DirectReply("No hay facturas de venta registradas todavía.")
+        lastQueriedInvoices = listOf(latest)
+        return ProcessResult.DirectReply(formatInvoiceDetail(latest, saleItems, bcvRate, headerTitle = "🧾 **Detalle de la Última Factura:**"))
+    }
+
+    private fun tryParseInvoicesByDateLocal(
+        text: String,
+        lower: String,
+        sales: List<Sale>,
+        bcvRate: Double
+    ): ProcessResult? {
+        val mentionsInvoices = lower.contains("facturas") ||
+            (lower.contains("factura") && (lower.contains("resumen") || lower.contains("del ") || lower.contains("de hoy") ||
+                lower.contains("de ayer") || lower.contains("semana") || lower.contains("mes") || lower.contains("entre") || lower.contains("rango")))
+        if (!mentionsInvoices) return null
+        if (lower.contains("proveedor") || lower.contains("registrar")) return null
+
+        val range = parseDateRangeFromText(lower) ?: return null
+        return buildInvoicesByDateReply(sales, range, bcvRate)
+    }
+
+    private fun buildInvoicesByDateReply(
+        sales: List<Sale>,
+        range: DateRangeResult,
+        bcvRate: Double
+    ): ProcessResult {
+        val matched = sales
+            .filter { it.timestamp in range.startMillis..range.endMillis }
+            .sortedByDescending { it.timestamp }
+
+        lastQueriedInvoices = matched.take(20)
+
+        if (matched.isEmpty()) {
+            return ProcessResult.DirectReply("📅 **Facturas (${range.label}):**\nNo se encontraron facturas registradas en ese período.")
+        }
+
+        val totalUsd = matched.sumOf { it.totalUsd }
+        val totalBs = matched.sumOf { it.totalBs }
+        val totalCashea = matched.sumOf { it.paymentCasheaUsd }
+        val totalCredit = matched.sumOf { it.paymentCreditUsd }
+        val timeFmt = SimpleDateFormat("dd/MM hh:mm a", Locale.getDefault())
+
+        val sb = StringBuilder()
+        sb.append("📅 **Resumen de Facturas (${range.label}):**\n")
+        sb.append("• Cantidad: **${matched.size} factura(s)**\n")
+        sb.append("• Total Facturado: **$${"%.2f".format(Locale.US, totalUsd)} USD** (Bs. ${"%.2f".format(Locale.US, totalBs)})\n")
+        if (totalCashea > 0.0) {
+            sb.append("• Cobrado con Cashea: **$${"%.2f".format(Locale.US, totalCashea)} USD**\n")
+        }
+        if (totalCredit > 0.0) {
+            sb.append("• Ventas a Crédito: **$${"%.2f".format(Locale.US, totalCredit)} USD**\n")
+        }
+        sb.append("\n**Listado:**\n")
+        matched.take(15).forEachIndexed { idx, sale ->
+            val paymentTag = buildPaymentSummaryShort(sale)
+            sb.append("${idx + 1}. **Factura #${sale.id}** — ${sale.customerName} | ${timeFmt.format(Date(sale.timestamp))} | **$${"%.2f".format(Locale.US, sale.totalUsd)}** ($paymentTag)\n")
+        }
+        if (matched.size > 15) {
+            sb.append("... y ${matched.size - 15} facturas más.\n")
+        }
+        sb.append("\n💡 *Dime **\"muéstrame la 1\"**, **\"detalle de la segunda\"**, **\"la de [cliente]\"** o **\"factura #${matched.first().id}\"** para ver todos sus productos.*")
+        return ProcessResult.DirectReply(sb.toString().trim())
+    }
+
+    private fun tryParseFollowUpInvoiceLocal(
+        trimmed: String,
+        lower: String,
+        saleItems: List<SaleItem>,
+        bcvRate: Double
+    ): ProcessResult? {
+        if (lastQueriedInvoices.isEmpty()) return null
+
+        val followUpPattern = Regex(
+            "^(?:(?:ver|mu[eé]strame|detalle|dame|abre|consulta(?:r)?|revisa(?:r)?|mostrar)\\s+)?(?:de\\s+)?(?:la|el)?\\s*(?:factura|opci[oó]n|n[uú]mero|#)?\\s*(?:#?\\d+|primera?|segunda?|tercera?|cuarta?|quinta?|sexta?|s[eé]ptima?|octava?|novena?|d[eé]cima?)\\b",
+            RegexOption.IGNORE_CASE
+        )
+        val looksLikeFollowUp = followUpPattern.containsMatchIn(lower) ||
+            lower.startsWith("la de ") || lower.startsWith("detalle de la de ") ||
+            lower.startsWith("muéstrame la de ") || lower.startsWith("muestrame la de ") ||
+            lower.startsWith("ver la de ") || lower == "esa" || lower == "esa factura" || lower == "ver esa"
+
+        if (!looksLikeFollowUp) return null
+
+        val chosen = resolveFollowUpInvoiceFromList(trimmed, lastQueriedInvoices) ?: return null
+        return ProcessResult.DirectReply(formatInvoiceDetail(chosen, saleItems, bcvRate))
+    }
+
+    private fun resolveFollowUpInvoiceFromList(reference: String, list: List<Sale>): Sale? {
+        if (list.isEmpty()) return null
+        val lower = reference.lowercase(Locale.ROOT).trim()
+
+        if (lower == "esa" || lower == "esa factura" || lower == "ver esa") {
+            return list.firstOrNull()
+        }
+
+        val ordinals = listOf(
+            listOf("primera", "primero", "1ra", "1ro") to 0,
+            listOf("segunda", "segundo", "2da", "2do") to 1,
+            listOf("tercera", "tercero", "3ra", "3ro") to 2,
+            listOf("cuarta", "cuarto", "4ta", "4to") to 3,
+            listOf("quinta", "quinto", "5ta", "5to") to 4,
+            listOf("sexta", "sexto", "6ta", "6to") to 5,
+            listOf("séptima", "septima", "séptimo", "septimo") to 6,
+            listOf("octava", "octavo") to 7,
+            listOf("novena", "noveno") to 8,
+            listOf("décima", "decima", "décimo", "decimo") to 9
+        )
+        for ((words, idx) in ordinals) {
+            if (words.any { lower.contains(it) }) {
+                return list.getOrNull(idx)
+            }
+        }
+
+        // Check explicit #id first (e.g. "#48" or "factura 48")
+        val hashNum = Regex("#(\\d+)").find(lower)?.groupValues?.get(1)?.toIntOrNull()
+        if (hashNum != null) {
+            list.find { it.id == hashNum }?.let { return it }
+        }
+
+        val numberVal = Regex("(\\d+)").find(lower)?.groupValues?.get(1)?.toIntOrNull()
+        if (numberVal != null) {
+            // If it fits as 1-based position in the listed summary, prefer positional selection unless no match or exact ID matches when out of bounds
+            if (numberVal in 1..list.size) {
+                return list[numberVal - 1]
+            }
+            list.find { it.id == numberVal }?.let { return it }
+        }
+
+        // Fallback: customer name fragment after "de "
+        val customerHint = lower
+            .replace(Regex("^(?:mu[eé]strame|muestrame|ver|detalle|abre)?\\s*(?:la|el)?\\s*(?:factura)?\\s*(?:de)?\\s*"), "")
+            .trim()
+        if (customerHint.isNotBlank()) {
+            list.find { it.customerName.contains(customerHint, ignoreCase = true) }?.let { return it }
+        }
+        return null
+    }
+
+    private fun formatInvoiceDetail(
+        invoice: Sale,
+        saleItems: List<SaleItem>,
+        bcvRate: Double,
+        headerTitle: String = "🧾 **Detalle de Factura #${invoice.id}:**"
+    ): String {
+        val dateStr = SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault()).format(Date(invoice.timestamp))
+        val itemsForSale = saleItems.filter { it.saleId == invoice.id }
+
+        val sb = StringBuilder()
+        sb.append("$headerTitle\n")
+        sb.append("• N° Factura: **#${invoice.id}** • Fecha: **$dateStr**\n")
+        sb.append("• Cliente: **${invoice.customerName}** (${invoice.customerDocument})\n")
+        if (invoice.cashierName.isNotBlank()) {
+            val cajaInfo = if (invoice.cashRegisterNumber.isNotBlank()) " • Caja ${invoice.cashRegisterNumber}" else ""
+            sb.append("• Cajero: ${invoice.cashierName}$cajaInfo\n")
+        }
+
+        sb.append("\n**Productos Facturados:**\n")
+        if (itemsForSale.isEmpty()) {
+            sb.append("• *Sin líneas de detalle registradas en esta factura.*\n")
+        } else {
+            itemsForSale.forEach { item ->
+                val qtyStr = if (item.quantity % 1.0 == 0.0) item.quantity.toInt().toString() else "%.2f".format(Locale.US, item.quantity)
+                val lineTotal = item.quantity * item.priceUsd
+                val exTag = if (item.isTaxExempt) " (E)" else ""
+                sb.append("  - ${qtyStr}x **${item.productName}**$exTag @ $${"%.2f".format(Locale.US, item.priceUsd)} = **$${"%.2f".format(Locale.US, lineTotal)}**\n")
+            }
+        }
+
+        if (invoice.discountUsd > 0.0 || invoice.ivaUsd > 0.0 || invoice.igtfUsd > 0.0) {
+            val extras = mutableListOf<String>()
+            if (invoice.ivaUsd > 0.0) extras.add("IVA: $${"%.2f".format(Locale.US, invoice.ivaUsd)}")
+            if (invoice.igtfUsd > 0.0) extras.add("IGTF: $${"%.2f".format(Locale.US, invoice.igtfUsd)}")
+            if (invoice.discountUsd > 0.0) extras.add("Desc: -$${"%.2f".format(Locale.US, invoice.discountUsd)}")
+            sb.append("\n• Desglose: ${extras.joinToString(" | ")}\n")
+        }
+
+        val methods = buildPaymentMethodsDetailed(invoice)
+        val effectiveRate = if (invoice.rateBcv > 0.01) invoice.rateBcv else bcvRate
+        val totalBsDisplay = if (invoice.totalBs > 0.0) invoice.totalBs else invoice.totalUsd * effectiveRate
+
+        sb.append("• **Total Factura: $${"%.2f".format(Locale.US, invoice.totalUsd)} USD** (Bs. ${"%.2f".format(Locale.US, totalBsDisplay)})\n")
+        sb.append("• Pagos: ${methods.ifBlank { "No especificado" }}")
+        if (invoice.paymentCreditUsd > 0.0) {
+            val statusStr = if (invoice.isCreditPaid) "PAGADO" else "PENDIENTE ($${"%.2f".format(Locale.US, maxOf(0.0, invoice.paymentCreditUsd - invoice.creditPaidAmountUsd))})"
+            sb.append("\n• Estado Crédito: **$statusStr**")
+        }
+        return sb.toString().trim()
+    }
+
+    private fun buildPaymentMethodsDetailed(invoice: Sale): String {
+        val methods = mutableListOf<String>()
+        if (invoice.paymentCashUsd > 0.0) methods.add("Efectivo $${"%.2f".format(Locale.US, invoice.paymentCashUsd)}")
+        if (invoice.paymentMobileBs > 0.0) methods.add("Pago Móvil Bs. ${"%.2f".format(Locale.US, invoice.paymentMobileBs)}")
+        if (invoice.paymentCardBs > 0.0) methods.add("Punto/Tarjeta Bs. ${"%.2f".format(Locale.US, invoice.paymentCardBs)}")
+        if (invoice.paymentCasheaUsd > 0.0) methods.add("Cashea $${"%.2f".format(Locale.US, invoice.paymentCasheaUsd)}")
+        if (invoice.paymentCreditUsd > 0.0) methods.add("Crédito $${"%.2f".format(Locale.US, invoice.paymentCreditUsd)}")
+        return methods.joinToString(" | ")
+    }
+
+    private fun buildPaymentSummaryShort(invoice: Sale): String {
+        val tags = mutableListOf<String>()
+        if (invoice.paymentCashUsd > 0.0) tags.add("Efectivo")
+        if (invoice.paymentMobileBs > 0.0) tags.add("Pago Móvil")
+        if (invoice.paymentCardBs > 0.0) tags.add("Punto")
+        if (invoice.paymentCasheaUsd > 0.0) tags.add("Cashea")
+        if (invoice.paymentCreditUsd > 0.0) tags.add(if (invoice.isCreditPaid) "Crédito Pagado" else "Crédito")
+        return if (tags.isEmpty()) "Pago" else tags.joinToString("+")
+    }
+
+    private fun saleToLookupMap(invoice: Sale, saleItems: List<SaleItem>): Map<String, Any> {
+        val items = saleItems.filter { it.saleId == invoice.id }.map {
+            mapOf(
+                "productName" to it.productName,
+                "quantity" to it.quantity,
+                "unitPriceUsd" to it.priceUsd,
+                "subtotalUsd" to (it.quantity * it.priceUsd)
+            )
+        }
+        return mapOf(
+            "found" to true,
+            "id" to invoice.id,
+            "date" to SimpleDateFormat("dd/MM/yyyy hh:mm a", Locale.getDefault()).format(Date(invoice.timestamp)),
+            "customerName" to invoice.customerName,
+            "customerDocument" to invoice.customerDocument,
+            "totalUsd" to invoice.totalUsd,
+            "totalBs" to invoice.totalBs,
+            "payments" to buildPaymentMethodsDetailed(invoice),
+            "items" to items
+        )
+    }
+
+    private fun isCasheaQueryIntent(lower: String): Boolean {
+        return lower.contains("cashea") && !lower.startsWith("ir a ") && !lower.startsWith("abre ") && !lower.startsWith("abrir ")
+    }
+
+    private fun buildCasheaStatusReply(
+        sales: List<Sale>,
+        settlements: List<CasheaSettlement>,
+        bcvRate: Double
+    ): ProcessResult {
+        val totalSoldCashea = sales.sumOf { it.paymentCasheaUsd }
+        val totalSettledGross = settlements.sumOf { it.grossAmountUsd }
+        val pendingDebt = maxOf(0.0, totalSoldCashea - totalSettledGross)
+        val totalCommissions = settlements.sumOf { it.commissionAmountUsd }
+        val totalNetReceived = settlements.sumOf { it.netReceivedUsd }
+
+        val text = "💳 **Estado Financiero de Cashea:**\n" +
+            "• Total vendido vía Cashea: **$${"%.2f".format(Locale.US, totalSoldCashea)} USD**\n" +
+            "• Total liquidado / pagado por Cashea: **$${"%.2f".format(Locale.US, totalSettledGross)} USD** (${settlements.size} abono(s))\n" +
+            "• **Deuda pendiente por cobrar a Cashea: $${"%.2f".format(Locale.US, pendingDebt)} USD** (Bs. ${"%.2f".format(Locale.US, pendingDebt * bcvRate)})\n" +
+            "• Neto recibido en banco: **$${"%.2f".format(Locale.US, totalNetReceived)} USD**\n" +
+            "• Ingresos no recibidos (Comisiones Cashea): **-$${"%.2f".format(Locale.US, totalCommissions)} USD**"
+        return ProcessResult.DirectReply(text)
+    }
+
+    private fun isPendingCreditsIntent(lower: String): Boolean {
+        return lower.contains("quién me debe") || lower.contains("quien me debe") ||
+            lower.contains("cuentas por cobrar") || lower.contains("créditos pendientes") ||
+            lower.contains("creditos pendientes") || lower.contains("deudas de clientes") ||
+            lower.contains("clientes con deuda") || lower.contains("fiado")
+    }
+
+    private fun buildPendingCreditsReply(sales: List<Sale>, bcvRate: Double): ProcessResult {
+        val unpaid = sales.filter { it.paymentCreditUsd > 0.0 && !it.isCreditPaid }
+            .sortedByDescending { it.timestamp }
+        if (unpaid.isEmpty()) {
+            return ProcessResult.DirectReply("✅ No tienes cuentas por cobrar ni créditos pendientes de clientes en este momento.")
+        }
+        val totalOwed = unpaid.sumOf { maxOf(0.0, it.paymentCreditUsd - it.creditPaidAmountUsd) }
+        val sb = StringBuilder()
+        sb.append("📒 **Cuentas por Cobrar (${unpaid.size} factura(s)):**\n")
+        sb.append("• **Total Pendiente: $${"%.2f".format(Locale.US, totalOwed)} USD** (Bs. ${"%.2f".format(Locale.US, totalOwed * bcvRate)})\n\n")
+        unpaid.take(10).forEach { s ->
+            val owed = maxOf(0.0, s.paymentCreditUsd - s.creditPaidAmountUsd)
+            sb.append("• **${s.customerName}** (Factura #${s.id}): **$${"%.2f".format(Locale.US, owed)} USD**\n")
+        }
+        if (unpaid.size > 10) {
+            sb.append("... y ${unpaid.size - 10} cuentas adicionales.")
+        }
+        return ProcessResult.DirectReply(sb.toString().trim())
+    }
+
+    private fun tryParseExpensesSummaryLocal(
+        lower: String,
+        expenses: List<Expense>,
+        bcvRate: Double
+    ): ProcessResult? {
+        val isQuery = (lower.contains("gasto") || lower.contains("egreso")) &&
+            (lower.contains("resumen") || lower.contains("cuánto") || lower.contains("cuanto") ||
+                lower.contains("total") || lower.contains("hoy") || lower.contains("mes") ||
+                lower.contains("ayer") || lower.contains("ver "))
+        if (!isQuery) return null
+        if (lower.contains("registra") || lower.contains("nuevo") || lower.contains("agrega") || lower.contains("anota")) return null
+
+        val range = parseDateRangeFromText(lower) ?: todayRange()
+        return buildExpensesSummaryReply(expenses, range, bcvRate)
+    }
+
+    private fun buildExpensesSummaryReply(
+        expenses: List<Expense>,
+        range: DateRangeResult,
+        bcvRate: Double
+    ): ProcessResult {
+        val filtered = expenses.filter { it.timestamp in range.startMillis..range.endMillis }
+        if (filtered.isEmpty()) {
+            return ProcessResult.DirectReply("💸 **Gastos (${range.label}):**\nNo hay gastos registrados en este período.")
+        }
+        val totalUsd = filtered.sumOf { it.amountUsd }
+        val byCat = filtered.groupBy { it.category }.mapValues { (_, items) -> items.sumOf { it.amountUsd } }
+            .entries.sortedByDescending { it.value }
+
+        val sb = StringBuilder()
+        sb.append("💸 **Resumen de Gastos (${range.label}):**\n")
+        sb.append("• Registros: **${filtered.size}**\n")
+        sb.append("• **Total Gastos: $${"%.2f".format(Locale.US, totalUsd)} USD** (Bs. ${"%.2f".format(Locale.US, totalUsd * bcvRate)})\n\n")
+        sb.append("**Por Categoría:**\n")
+        byCat.take(6).forEach { (cat, amt) ->
+            sb.append("• $cat: **$${"%.2f".format(Locale.US, amt)} USD**\n")
+        }
+        return ProcessResult.DirectReply(sb.toString().trim())
+    }
+
+    private fun isInventoryValuationIntent(lower: String): Boolean {
+        return lower.contains("valor del inventario") || lower.contains("valorización") ||
+            lower.contains("valorizacion") || lower.contains("capital en inventario") ||
+            lower.contains("capital invertido") || lower.contains("cuánto tengo en inventario") ||
+            lower.contains("cuanto tengo en inventario") || lower.contains("resumen de inventario") ||
+            lower.contains("total del inventario")
+    }
+
+    private fun buildInventoryValuationReply(products: List<Product>, bcvRate: Double): ProcessResult {
+        if (products.isEmpty()) {
+            return ProcessResult.DirectReply("📦 Tu inventario se encuentra vacío actualmente.")
+        }
+        val physical = products.filter { !it.isRecipe }
+        val totalUnits = physical.sumOf { maxOf(0.0, it.stock) }
+        val costVal = physical.sumOf { maxOf(0.0, it.stock) * it.costPriceUsd }
+        val retailVal = physical.sumOf { maxOf(0.0, it.stock) * it.priceUsd }
+        val profitVal = retailVal - costVal
+        val outOfStock = physical.count { it.isOutOfStockAlertTriggered(products) }
+        val lowStock = physical.count { it.isLowStockAlertTriggered(products) && !it.isOutOfStockAlertTriggered(products) }
+
+        val unitsStr = if (totalUnits % 1.0 == 0.0) totalUnits.toInt().toString() else "%.1f".format(Locale.US, totalUnits)
+        val text = "💎 **Valorización del Inventario:**\n" +
+            "• Productos registrados: **${products.size}** ($unitsStr uds físicas)\n" +
+            "• Capital invertido (al costo): **$${"%.2f".format(Locale.US, costVal)} USD**\n" +
+            "• Valor potencial de venta: **$${"%.2f".format(Locale.US, retailVal)} USD** (Bs. ${"%.2f".format(Locale.US, retailVal * bcvRate)})\n" +
+            "• Utilidad bruta proyectada: **$${"%.2f".format(Locale.US, profitVal)} USD**\n" +
+            "• Alertas activas: **$outOfStock agotado(s)** | **$lowStock en stock mínimo**"
+        return ProcessResult.DirectReply(text)
+    }
+
+    private fun tryParseUpdateProductPriceLocal(
+        text: String,
+        products: List<Product>,
+        bcvRate: Double
+    ): ProcessResult? {
+        val lower = text.lowercase(Locale.ROOT)
+        val hasVerb = lower.contains("cambia") || lower.contains("actualiza") || lower.contains("modifica") ||
+            lower.contains("pon") || lower.contains("fija") || lower.contains("sube") || lower.contains("baja")
+        if (!hasVerb || !lower.contains("precio")) return null
+        if (lower.contains("nuevo producto") || lower.contains("crear producto")) return null
+
+        val match = Regex(
+            "(?:cambia|cambiar|actualiza|actualizar|modifica|modificar|pon|ponle|fija|sube|baja)\\s+(?:el\\s+)?precio\\s+(?:de\\s+venta\\s+)?(?:de\\s+|del\\s+|de\\s+la\\s+|al\\s+)?([a-záéíóúüñ0-9\\s\\-]+?)\\s+(?:a|en)\\s+\\$?([0-9]+(?:[.,][0-9]+)?)",
+            RegexOption.IGNORE_CASE
+        ).find(text) ?: return null
+
+        val productQuery = match.groupValues[1].trim()
+        val newPrice = match.groupValues[2].replace(",", ".").toDoubleOrNull() ?: return null
+        return proposeUpdateProductPrice(productQuery, newPrice, null, products, bcvRate)
+    }
+
+    private fun proposeUpdateProductPrice(
+        productQuery: String,
+        newPriceUsd: Double,
+        newWholesaleUsd: Double?,
+        products: List<Product>,
+        bcvRate: Double
+    ): ProcessResult {
+        if (productQuery.isBlank() || newPriceUsd <= 0.0) {
+            return ProcessResult.DirectReply("Indica el nombre del producto y el nuevo precio en USD mayor a $0.00.")
+        }
+        val matches = findMatchingProducts(productQuery, products)
+        if (matches.isEmpty()) {
+            return ProcessResult.DirectReply("No encontré el producto '$productQuery' en el inventario.")
+        }
+        val target = matches.first()
+        val action = PendingAssistantAction.UpdateProductPriceAction(
+            productId = target.id,
+            productName = target.name,
+            currentPriceUsd = target.priceUsd,
+            newPriceUsd = newPriceUsd,
+            currentWholesaleUsd = target.wholesalePriceUsd,
+            newWholesaleUsd = newWholesaleUsd?.takeIf { it > 0.0 }
+        )
+        val wholesaleLine = if (action.newWholesaleUsd != null) {
+            "\n• Nuevo Precio Mayor: **$${"%.2f".format(Locale.US, action.newWholesaleUsd)}**"
+        } else ""
+        val text = "🏷️ **Actualizar Precio de Producto:**\n" +
+            "• Producto: **${target.name}**\n" +
+            "• Precio actual: $${"%.2f".format(Locale.US, target.priceUsd)} USD\n" +
+            "• Nuevo precio: **$${"%.2f".format(Locale.US, newPriceUsd)} USD** (Bs. ${"%.2f".format(Locale.US, newPriceUsd * bcvRate)})" +
+            wholesaleLine + "\n\n" +
+            "¿Deseas confirmar este cambio de precio?"
+        return ProcessResult.ProposeAction(action, text)
+    }
+
+    private data class DateRangeResult(
+        val startMillis: Long,
+        val endMillis: Long,
+        val label: String
+    )
+
+    private fun todayRange(): DateRangeResult {
+        val start = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val end = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
+        return DateRangeResult(start, end, "Hoy")
+    }
+
+    private fun currentMonthRange(): DateRangeResult {
+        val start = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val end = todayRange().endMillis
+        return DateRangeResult(start, end, "Este Mes")
+    }
+
+    private fun resolveDateRangeFromArgs(periodArg: String, startArg: String, endArg: String): DateRangeResult {
+        if (startArg.isNotBlank()) {
+            val startCal = parseExplicitDateCal(startArg)
+            val endCal = if (endArg.isNotBlank()) parseExplicitDateCal(endArg) else startCal
+            if (startCal != null && endCal != null) {
+                val s = startOfDayMillis(startCal)
+                val e = endOfDayMillis(endCal)
+                val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                val label = if (s <= e && endArg.isNotBlank()) "${fmt.format(Date(s))} al ${fmt.format(Date(e))}" else fmt.format(Date(s))
+                return DateRangeResult(minOf(s, e), maxOf(s, e), label)
+            }
+        }
+        return parseDateRangeFromText(periodArg.lowercase(Locale.ROOT)) ?: todayRange()
+    }
+
+    private fun parseDateRangeFromText(lower: String): DateRangeResult? {
+        if (lower.contains("hoy")) return todayRange()
+        if (lower.contains("anteayer") || lower.contains("antes de ayer")) {
+            val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -2) }
+            return DateRangeResult(startOfDayMillis(cal), endOfDayMillis(cal), "Anteayer")
+        }
+        if (lower.contains("ayer")) {
+            val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+            return DateRangeResult(startOfDayMillis(cal), endOfDayMillis(cal), "Ayer")
+        }
+        if (lower.contains("semana") || lower.contains("7 días") || lower.contains("7 dias")) {
+            val startCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -6) }
+            return DateRangeResult(startOfDayMillis(startCal), todayRange().endMillis, "Últimos 7 días")
+        }
+        if (lower.contains("mes")) {
+            return currentMonthRange()
+        }
+
+        val dateMatches = Regex("(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{2,4}))?").findAll(lower).toList()
+        if (dateMatches.size >= 2) {
+            val c1 = parseExplicitDateMatch(dateMatches[0])
+            val c2 = parseExplicitDateMatch(dateMatches[1])
+            if (c1 != null && c2 != null) {
+                val s = startOfDayMillis(c1)
+                val e = endOfDayMillis(c2)
+                val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                val minStart = minOf(s, startOfDayMillis(c2))
+                val maxEnd = maxOf(e, endOfDayMillis(c1))
+                return DateRangeResult(minStart, maxEnd, "${fmt.format(Date(minStart))} al ${fmt.format(Date(maxEnd))}")
+            }
+        } else if (dateMatches.size == 1) {
+            val c = parseExplicitDateMatch(dateMatches[0])
+            if (c != null) {
+                val s = startOfDayMillis(c)
+                val e = endOfDayMillis(c)
+                val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                return DateRangeResult(s, e, fmt.format(Date(s)))
+            }
+        }
+        return null
+    }
+
+    private fun parseExplicitDateCal(raw: String): Calendar? {
+        val m = Regex("(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{2,4}))?").find(raw.trim()) ?: return null
+        return parseExplicitDateMatch(m)
+    }
+
+    private fun parseExplicitDateMatch(m: MatchResult): Calendar? {
+        val day = m.groupValues[1].toIntOrNull() ?: return null
+        val month = m.groupValues[2].toIntOrNull() ?: return null
+        val rawYear = m.groupValues[3].toIntOrNull()
+        val year = when {
+            rawYear == null -> Calendar.getInstance().get(Calendar.YEAR)
+            rawYear < 100 -> 2000 + rawYear
+            else -> rawYear
+        }
+        if (month !in 1..12 || day !in 1..31) return null
+        return Calendar.getInstance().apply {
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month - 1)
+            set(Calendar.DAY_OF_MONTH, day)
+        }
+    }
+
+    private fun startOfDayMillis(cal: Calendar): Long {
+        return (cal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
+
+    private fun endOfDayMillis(cal: Calendar): Long {
+        return (cal.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+            set(Calendar.MILLISECOND, 999)
+        }.timeInMillis
     }
 
     private fun prepareCreateProductAction(p: ParsedProduct, bcvRate: Double): ProcessResult {
@@ -1741,6 +2504,8 @@ class ConversationalAssistantEngine(
                     "Cambio de tasa BCV pendiente -> Bs. ${action.newRateBs}"
                 is PendingAssistantAction.DeleteProductAction ->
                     "Eliminación pendiente -> ${action.productName}"
+                is PendingAssistantAction.UpdateProductPriceAction ->
+                    "Cambio de precio pendiente -> ${action.productName}: $${action.currentPriceUsd} -> $${action.newPriceUsd}"
                 is PendingAssistantAction.SelectDisambiguation ->
                     "Selección pendiente entre: ${action.candidates.joinToString { it.title }}"
                 null -> null
@@ -1879,6 +2644,7 @@ class ConversationalAssistantEngine(
                 raw.contains("pos") || raw.contains("facturación") || raw.contains("facturacion") || raw.contains("caja") || raw.contains("vender") -> "pos"
                 raw.contains("presupuesto") || raw.contains("cotizacion") || raw.contains("cotización") || raw == "quotes" -> "quotes"
                 raw.contains("inventario") || raw.contains("producto") || raw == "inventory" -> "inventory"
+                raw.contains("cashea") -> "cashea"
                 raw.contains("factura") || raw == "invoices" -> "invoices"
                 raw.contains("gasto") || raw == "expenses" -> "expenses"
                 raw.contains("resumen") || raw == "summary" -> "summary"
@@ -1893,6 +2659,7 @@ class ConversationalAssistantEngine(
             "pos" -> "Facturación / POS"
             "quotes" -> "Presupuestos"
             "inventory" -> "Inventario"
+            "cashea" -> "Cashea"
             "invoices" -> "Facturas"
             "expenses" -> "Gastos"
             "summary" -> "Resumen Diario"

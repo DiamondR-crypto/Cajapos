@@ -31,9 +31,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.ui.PosViewModel
+import com.example.ui.components.KeyboardAwareDialog
+import com.example.ui.components.ResponsivePair
 import com.example.utils.CsvInventoryParser
 import com.example.utils.CsvParseResult
 import com.example.utils.ParsedCsvProductRow
@@ -101,25 +101,19 @@ fun CsvInventoryImportDialog(
         }
     }
 
-    Dialog(
+    KeyboardAwareDialog(
         onDismissRequest = { if (!isImporting) onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        maxWidth = 760.dp,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 8.dp,
+        dismissOnClickOutside = !isImporting,
+        modifier = Modifier.fillMaxHeight(0.92f)
     ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .widthIn(max = 760.dp)
-                .fillMaxHeight(0.92f)
-                .padding(vertical = 12.dp)
+                .fillMaxSize()
+                .padding(20.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
-            ) {
                 // Cabecera del diálogo
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -221,10 +215,11 @@ fun CsvInventoryImportDialog(
                             )
 
                             // Columnas soportadas
-                            Row(
+                            @OptIn(ExperimentalLayoutApi::class)
+                            FlowRow(
                                 modifier = Modifier.padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 HeaderFormatChip(name = "producto")
                                 HeaderFormatChip(name = "cantidad")
@@ -357,39 +352,79 @@ fun CsvInventoryImportDialog(
                             }
                         }
 
-                        // Tarjetas de Métricas Clave
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            MetricCard(
-                                title = "Válidos",
-                                value = "${result.validRows.size}",
-                                subtitle = "Productos",
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.weight(1f)
-                            )
-                            MetricCard(
-                                title = "Unidades",
-                                value = "${result.totalQuantity}",
-                                subtitle = "Stock Total",
-                                color = Color(0xFF0284C7),
-                                modifier = Modifier.weight(1f)
-                            )
-                            MetricCard(
-                                title = "Costo Total",
-                                value = "$${String.format(java.util.Locale.US, "%.2f", result.totalCostValue)}",
-                                subtitle = "Inversión",
-                                color = Color(0xFFD97706),
-                                modifier = Modifier.weight(1f)
-                            )
-                            MetricCard(
-                                title = "Venta Total",
-                                value = "$${String.format(java.util.Locale.US, "%.2f", result.totalSaleValue)}",
-                                subtitle = "Margen: +$${String.format(java.util.Locale.US, "%.2f", result.totalMargin)}",
-                                color = Color(0xFF059669),
-                                modifier = Modifier.weight(1f)
-                            )
+                        // Tarjetas de Métricas Clave (2x2 en compacto, 4 en ancho)
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val wideCards = maxWidth >= 520.dp
+                            if (wideCards) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    MetricCard(
+                                        title = "Válidos",
+                                        value = "${result.validRows.size}",
+                                        subtitle = "Productos",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    MetricCard(
+                                        title = "Unidades",
+                                        value = "${result.totalQuantity}",
+                                        subtitle = "Stock Total",
+                                        color = Color(0xFF0284C7),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    MetricCard(
+                                        title = "Costo Total",
+                                        value = "$${String.format(java.util.Locale.US, "%.2f", result.totalCostValue)}",
+                                        subtitle = "Inversión",
+                                        color = Color(0xFFD97706),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    MetricCard(
+                                        title = "Venta Total",
+                                        value = "$${String.format(java.util.Locale.US, "%.2f", result.totalSaleValue)}",
+                                        subtitle = "Margen: +$${String.format(java.util.Locale.US, "%.2f", result.totalMargin)}",
+                                        color = Color(0xFF059669),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MetricCard(
+                                            title = "Válidos",
+                                            value = "${result.validRows.size}",
+                                            subtitle = "Productos",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        MetricCard(
+                                            title = "Unidades",
+                                            value = "${result.totalQuantity}",
+                                            subtitle = "Stock Total",
+                                            color = Color(0xFF0284C7),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MetricCard(
+                                            title = "Costo Total",
+                                            value = "$${String.format(java.util.Locale.US, "%.2f", result.totalCostValue)}",
+                                            subtitle = "Inversión",
+                                            color = Color(0xFFD97706),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        MetricCard(
+                                            title = "Venta Total",
+                                            value = "$${String.format(java.util.Locale.US, "%.2f", result.totalSaleValue)}",
+                                            subtitle = "Margen: +$${String.format(java.util.Locale.US, "%.2f", result.totalMargin)}",
+                                            color = Color(0xFF059669),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
                         }
 
                         // Resumen de advertencias / errores
@@ -534,64 +569,68 @@ fun CsvInventoryImportDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Barra de Acciones / Botón de Confirmación
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        enabled = !isImporting,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(if (importSuccessMessage != null) "Cerrar" else "Cancelar")
-                    }
+                ResponsivePair(
+                    breakpoint = 380.dp,
+                    horizontalSpacing = 10.dp,
+                    verticalSpacing = 8.dp,
+                    firstWeight = 1f,
+                    secondWeight = 1.6f,
+                    first = { mod ->
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            enabled = !isImporting,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = mod.defaultMinSize(minHeight = 48.dp)
+                        ) {
+                            Text(if (importSuccessMessage != null) "Cerrar" else "Cancelar")
+                        }
+                    },
+                    second = { mod ->
+                        Button(
+                            onClick = {
+                                val rowsToImport = parseResult?.validRows ?: return@Button
+                                if (rowsToImport.isEmpty()) return@Button
 
-                    Button(
-                        onClick = {
-                            val rowsToImport = parseResult?.validRows ?: return@Button
-                            if (rowsToImport.isEmpty()) return@Button
-
-                            isImporting = true
-                            parseError = null
-                            viewModel.importProductsFromCsv(rowsToImport) { success, importedCount, updatedCount, createdCount, msg ->
-                                isImporting = false
-                                if (success) {
-                                    val finalNotification = "Se importaron $importedCount productos correctamente. ${parseResult?.warnings?.size ?: 0} filas tuvieron errores."
-                                    importSuccessMessage = finalNotification
-                                    Toast.makeText(context, finalNotification, Toast.LENGTH_LONG).show()
-                                    onImportCompleted?.invoke(finalNotification)
-                                } else {
-                                    parseError = msg
+                                isImporting = true
+                                parseError = null
+                                viewModel.importProductsFromCsv(rowsToImport) { success, importedCount, _, _, msg ->
+                                    isImporting = false
+                                    if (success) {
+                                        val finalNotification = "Se importaron $importedCount productos correctamente. ${parseResult?.warnings?.size ?: 0} filas tuvieron errores."
+                                        importSuccessMessage = finalNotification
+                                        Toast.makeText(context, finalNotification, Toast.LENGTH_LONG).show()
+                                        onImportCompleted?.invoke(finalNotification)
+                                    } else {
+                                        parseError = msg
+                                    }
                                 }
+                            },
+                            enabled = !isImporting && !isParsing && (parseResult?.validRows?.isNotEmpty() == true) && importSuccessMessage == null,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                            modifier = mod.defaultMinSize(minHeight = 48.dp)
+                        ) {
+                            if (isImporting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Guardando...")
+                            } else {
+                                Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (parseResult != null) "Confirmar Importación (${parseResult!!.validRows.size})" else "Confirmar e Importar",
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
-                        },
-                        enabled = !isImporting && !isParsing && (parseResult?.validRows?.isNotEmpty() == true) && importSuccessMessage == null,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                        modifier = Modifier.weight(1.6f)
-                    ) {
-                        if (isImporting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Guardando...")
-                        } else {
-                            Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (parseResult != null) "Confirmar Importación (${parseResult!!.validRows.size})" else "Confirmar e Importar",
-                                fontWeight = FontWeight.Bold
-                            )
                         }
                     }
-                }
+                )
             }
         }
-    }
 }
 
 @Composable

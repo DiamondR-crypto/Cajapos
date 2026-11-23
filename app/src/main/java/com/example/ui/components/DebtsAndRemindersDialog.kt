@@ -2,14 +2,11 @@ package com.example.ui.components
 
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -21,9 +18,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.PurchaseInvoice
 import com.example.data.local.Sale
@@ -31,7 +28,7 @@ import com.example.ui.PosViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun DebtsAndRemindersDialog(
     viewModel: PosViewModel,
@@ -91,127 +88,149 @@ fun DebtsAndRemindersDialog(
 
     val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 700.dp,
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 6.dp,
+        horizontalPadding = 12.dp,
+        verticalPadding = 12.dp,
+        modifier = Modifier.fillMaxHeight(0.92f)
+    ) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 700.dp)
-                .fillMaxHeight(0.92f)
-                .padding(vertical = 12.dp)
+                .fillMaxSize()
+                .padding(16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(18.dp)
+            // Header with Close 'X'
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Header with Close 'X'
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.AccountBalanceWallet,
-                            contentDescription = null,
-                            tint = Color(0xFFD97706)
-                        )
-                        Text(
-                            "Control de Créditos y Deudas",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "Cerrar", modifier = Modifier.size(20.dp))
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Navigation Tabs
-                TabRow(
-                    selectedTabIndex = selectedTab,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    indicator = {},
-                    divider = {},
-                    modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                ) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.Filled.PeopleAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Clientes por Cobrar ($pendingCreditSalesCount)", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            }
-                        }
+                    Icon(
+                        Icons.Filled.AccountBalanceWallet,
+                        contentDescription = null,
+                        tint = Color(0xFFD97706)
                     )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Proveedores por Pagar ($pendingInvoicesCount)", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            }
-                        }
+                    Text(
+                        "Control de Créditos y Deudas",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Filter chips (Pendientes, Pagadas, Todas)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 ) {
-                    FilterChip(
-                        selected = filterStatus == "PENDING",
-                        onClick = { filterStatus = "PENDING" },
-                        label = { Text("Pendientes", fontSize = 11.5.sp) },
-                        leadingIcon = {
-                            if (filterStatus == "PENDING") Icon(Icons.Filled.Pending, contentDescription = null, modifier = Modifier.size(14.dp))
-                        }
-                    )
-                    FilterChip(
-                        selected = filterStatus == "PAID",
-                        onClick = { filterStatus = "PAID" },
-                        label = { Text("Pagadas / Saldadas", fontSize = 11.5.sp) },
-                        leadingIcon = {
-                            if (filterStatus == "PAID") Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
-                        }
-                    )
-                    FilterChip(
-                        selected = filterStatus == "ALL",
-                        onClick = { filterStatus = "ALL" },
-                        label = { Text("Ver Todas", fontSize = 11.5.sp) }
-                    )
+                    Icon(Icons.Filled.Close, contentDescription = "Cerrar", modifier = Modifier.size(20.dp))
                 }
+            }
 
-                Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
-                if (selectedTab == 0) {
-                    // --- CLIENTS CREDITS (CUENTAS POR COBRAR) ---
-                    // KPI Card
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7).copy(alpha = 0.5f)),
-                        border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+            // Navigation Tabs
+            TabRow(
+                selectedTabIndex = selectedTab,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                indicator = {},
+                divider = {},
+                modifier = Modifier.clip(RoundedCornerShape(12.dp))
+            ) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = {
                         Row(
-                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            Icon(Icons.Filled.PeopleAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text(
+                                "Clientes ($pendingCreditSalesCount)",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Filled.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text(
+                                "Proveedores ($pendingInvoicesCount)",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Filter chips (Pendientes, Pagadas, Todas)
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = filterStatus == "PENDING",
+                    onClick = { filterStatus = "PENDING" },
+                    label = { Text("Pendientes", fontSize = 11.5.sp) },
+                    leadingIcon = {
+                        if (filterStatus == "PENDING") Icon(Icons.Filled.Pending, contentDescription = null, modifier = Modifier.size(14.dp))
+                    }
+                )
+                FilterChip(
+                    selected = filterStatus == "PAID",
+                    onClick = { filterStatus = "PAID" },
+                    label = { Text("Pagadas / Saldadas", fontSize = 11.5.sp) },
+                    leadingIcon = {
+                        if (filterStatus == "PAID") Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(14.dp))
+                    }
+                )
+                FilterChip(
+                    selected = filterStatus == "ALL",
+                    onClick = { filterStatus = "ALL" },
+                    label = { Text("Ver Todas", fontSize = 11.5.sp) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            if (selectedTab == 0) {
+                // --- CLIENTS CREDITS (CUENTAS POR COBRAR) ---
+                // KPI Card
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7).copy(alpha = 0.5f)),
+                    border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ResponsiveActionRow(
+                        modifier = Modifier.padding(12.dp),
+                        breakpoint = 360.dp,
+                        stackedActionAlignment = Alignment.Start,
+                        content = {
                             Column {
                                 Text("Total Deuda Clientes Pendiente", style = MaterialTheme.typography.labelSmall, color = Color(0xFF92400E))
                                 Text(
@@ -226,7 +245,12 @@ fun DebtsAndRemindersDialog(
                                     color = Color(0xFF78350F)
                                 )
                             }
-                            Column(horizontalAlignment = Alignment.End) {
+                        },
+                        action = {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 if (dueTodayCreditCount > 0) {
                                     Surface(
                                         color = Color(0xFFEF4444),
@@ -242,7 +266,6 @@ fun DebtsAndRemindersDialog(
                                     }
                                 }
                                 if (overdueCreditCount > 0) {
-                                    Spacer(modifier = Modifier.height(4.dp))
                                     Surface(
                                         color = Color(0xFFB91C1C),
                                         shape = RoundedCornerShape(6.dp)
@@ -258,7 +281,8 @@ fun DebtsAndRemindersDialog(
                                 }
                             }
                         }
-                    }
+                    )
+                }
 
                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -299,92 +323,99 @@ fun DebtsAndRemindersDialog(
                                     )
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                Text(
-                                                    "Factura #${sale.id}",
-                                                    fontWeight = FontWeight.Bold,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                                Surface(
-                                                    color = if (sale.isCreditPaid) Color(0xFF10B981).copy(alpha = 0.15f) else Color(0xFFF59E0B).copy(alpha = 0.15f),
-                                                    shape = RoundedCornerShape(6.dp)
+                                        ResponsiveActionRow(
+                                            breakpoint = 340.dp,
+                                            stackedActionAlignment = Alignment.Start,
+                                            content = {
+                                                FlowRow(
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
                                                     Text(
-                                                        if (sale.isCreditPaid) "SALDADO" else "PENDIENTE",
-                                                        color = if (sale.isCreditPaid) Color(0xFF059669) else Color(0xFFD97706),
+                                                        "Factura #${sale.id}",
                                                         fontWeight = FontWeight.Bold,
-                                                        fontSize = 10.5.sp,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.primary
                                                     )
+                                                    Surface(
+                                                        color = if (sale.isCreditPaid) Color(0xFF10B981).copy(alpha = 0.15f) else Color(0xFFF59E0B).copy(alpha = 0.15f),
+                                                        shape = RoundedCornerShape(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            if (sale.isCreditPaid) "SALDADO" else "PENDIENTE",
+                                                            color = if (sale.isCreditPaid) Color(0xFF059669) else Color(0xFFD97706),
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 10.5.sp,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
                                                 }
-                                            }
-
-                                            // Due date badge
-                                            if (sale.creditDueDate > 0) {
-                                                Surface(
-                                                    color = when {
-                                                        sale.isCreditPaid -> MaterialTheme.colorScheme.surfaceVariant
-                                                        isOverdue -> Color(0xFFEF4444)
-                                                        isDueToday -> Color(0xFFF97316)
-                                                        else -> MaterialTheme.colorScheme.surfaceVariant
-                                                    },
-                                                    shape = RoundedCornerShape(6.dp)
-                                                ) {
-                                                    Text(
-                                                        text = when {
-                                                            sale.isCreditPaid -> "Venció: ${dateFormat.format(Date(sale.creditDueDate))}"
-                                                            isOverdue -> "¡VENCIDO! (${dateFormat.format(Date(sale.creditDueDate))})"
-                                                            isDueToday -> "¡VENCE HOY!"
-                                                            else -> "Vence: ${dateFormat.format(Date(sale.creditDueDate))}"
+                                            },
+                                            action = {
+                                                if (sale.creditDueDate > 0) {
+                                                    Surface(
+                                                        color = when {
+                                                            sale.isCreditPaid -> MaterialTheme.colorScheme.surfaceVariant
+                                                            isOverdue -> Color(0xFFEF4444)
+                                                            isDueToday -> Color(0xFFF97316)
+                                                            else -> MaterialTheme.colorScheme.surfaceVariant
                                                         },
-                                                        color = if (isOverdue || isDueToday) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
+                                                        shape = RoundedCornerShape(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = when {
+                                                                sale.isCreditPaid -> "Venció: ${dateFormat.format(Date(sale.creditDueDate))}"
+                                                                isOverdue -> "¡VENCIDO! (${dateFormat.format(Date(sale.creditDueDate))})"
+                                                                isDueToday -> "¡VENCE HOY!"
+                                                                else -> "Vence: ${dateFormat.format(Date(sale.creditDueDate))}"
+                                                            },
+                                                            color = if (isOverdue || isDueToday) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
+                                        )
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column {
-                                                Text(
-                                                    "Cliente: ${sale.customerName.ifBlank { "Consumidor Final" }}",
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                                if (sale.customerDocument.isNotBlank()) {
+                                        ResponsiveActionRow(
+                                            breakpoint = 360.dp,
+                                            stackedActionAlignment = Alignment.Start,
+                                            content = {
+                                                Column {
                                                     Text(
-                                                        "Doc: ${sale.customerDocument}",
-                                                        style = MaterialTheme.typography.labelSmall,
+                                                        "Cliente: ${sale.customerName.ifBlank { "Consumidor Final" }}",
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    if (sale.customerDocument.isNotBlank()) {
+                                                        Text(
+                                                            "Doc: ${sale.customerDocument}",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            action = {
+                                                Column(horizontalAlignment = Alignment.End) {
+                                                    Text(
+                                                        "Crédito: \$${String.format(Locale.US, "%.2f", sale.paymentCreditUsd)} USD",
+                                                        style = MaterialTheme.typography.bodySmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
+                                                    Text(
+                                                        "Por Cobrar: \$${String.format(Locale.US, "%.2f", pendingDebt)} USD",
+                                                        fontWeight = FontWeight.Bold,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = if (sale.isCreditPaid) Color(0xFF059669) else Color(0xFFDC2626)
+                                                    )
                                                 }
                                             }
-
-                                            Column(horizontalAlignment = Alignment.End) {
-                                                Text(
-                                                    "Crédito: \$${String.format(Locale.US, "%.2f", sale.paymentCreditUsd)} USD",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                                Text(
-                                                    "Por Cobrar: \$${String.format(Locale.US, "%.2f", pendingDebt)} USD",
-                                                    fontWeight = FontWeight.Bold,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = if (sale.isCreditPaid) Color(0xFF059669) else Color(0xFFDC2626)
-                                                )
-                                            }
-                                        }
+                                        )
 
                                         if (sale.creditNotes.isNotBlank()) {
                                             Text(
@@ -402,7 +433,8 @@ fun DebtsAndRemindersDialog(
                                                 Button(
                                                     onClick = { selectedSaleForPayment = sale },
                                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                                     shape = RoundedCornerShape(8.dp)
                                                 ) {
                                                     Icon(Icons.Filled.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -424,57 +456,62 @@ fun DebtsAndRemindersDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column {
-                                Text("Total Deuda Proveedores Pendiente", style = MaterialTheme.typography.labelSmall, color = Color(0xFF1E40AF))
-                                Text(
-                                    "\$${String.format(Locale.US, "%.2f", totalPendingSupplierDebtUsd)} USD",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1D4ED8)
-                                )
-                                Text(
-                                    "≈ Bs. ${String.format(Locale.US, "%.2f", totalPendingSupplierDebtUsd * bcvRate)}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF1E3A8A)
-                                )
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                if (dueTodayInvoiceCount > 0) {
-                                    Surface(
-                                        color = Color(0xFFEF4444),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            "⏰ $dueTodayInvoiceCount Por Pagar Hoy",
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
-                                        )
+                        ResponsiveActionRow(
+                            modifier = Modifier.padding(12.dp),
+                            breakpoint = 360.dp,
+                            stackedActionAlignment = Alignment.Start,
+                            content = {
+                                Column {
+                                    Text("Total Deuda Proveedores Pendiente", style = MaterialTheme.typography.labelSmall, color = Color(0xFF1E40AF))
+                                    Text(
+                                        "\$${String.format(Locale.US, "%.2f", totalPendingSupplierDebtUsd)} USD",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF1D4ED8)
+                                    )
+                                    Text(
+                                        "≈ Bs. ${String.format(Locale.US, "%.2f", totalPendingSupplierDebtUsd * bcvRate)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFF1E3A8A)
+                                    )
+                                }
+                            },
+                            action = {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (dueTodayInvoiceCount > 0) {
+                                        Surface(
+                                            color = Color(0xFFEF4444),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                "⏰ $dueTodayInvoiceCount Por Pagar Hoy",
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+                                    if (overdueInvoiceCount > 0) {
+                                        Surface(
+                                            color = Color(0xFFB91C1C),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                "⚠️ $overdueInvoiceCount Vencidas",
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp
+                                            )
+                                        }
                                     }
                                 }
-                                if (overdueInvoiceCount > 0) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Surface(
-                                        color = Color(0xFFB91C1C),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            "⚠️ $overdueInvoiceCount Vencidas",
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
                             }
-                        }
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -516,84 +553,92 @@ fun DebtsAndRemindersDialog(
                                     )
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                Text(
-                                                    "Factura #${invoice.invoiceNumber}",
-                                                    fontWeight = FontWeight.Bold,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                                Surface(
-                                                    color = if (invoice.isPaid) Color(0xFF10B981).copy(alpha = 0.15f) else Color(0xFF3B82F6).copy(alpha = 0.15f),
-                                                    shape = RoundedCornerShape(6.dp)
+                                        ResponsiveActionRow(
+                                            breakpoint = 340.dp,
+                                            stackedActionAlignment = Alignment.Start,
+                                            content = {
+                                                FlowRow(
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
                                                     Text(
-                                                        if (invoice.isPaid) "PAGADA" else "POR PAGAR",
-                                                        color = if (invoice.isPaid) Color(0xFF059669) else Color(0xFF2563EB),
+                                                        "Factura #${invoice.invoiceNumber}",
                                                         fontWeight = FontWeight.Bold,
-                                                        fontSize = 10.5.sp,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.primary
                                                     )
+                                                    Surface(
+                                                        color = if (invoice.isPaid) Color(0xFF10B981).copy(alpha = 0.15f) else Color(0xFF3B82F6).copy(alpha = 0.15f),
+                                                        shape = RoundedCornerShape(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            if (invoice.isPaid) "PAGADA" else "POR PAGAR",
+                                                            color = if (invoice.isPaid) Color(0xFF059669) else Color(0xFF2563EB),
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 10.5.sp,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
                                                 }
-                                            }
-
-                                            if (invoice.dueDate > 0) {
-                                                Surface(
-                                                    color = when {
-                                                        invoice.isPaid -> MaterialTheme.colorScheme.surfaceVariant
-                                                        isOverdue -> Color(0xFFEF4444)
-                                                        isDueToday -> Color(0xFFF97316)
-                                                        else -> MaterialTheme.colorScheme.surfaceVariant
-                                                    },
-                                                    shape = RoundedCornerShape(6.dp)
-                                                ) {
-                                                    Text(
-                                                        text = when {
-                                                            invoice.isPaid -> "Venció: ${dateFormat.format(Date(invoice.dueDate))}"
-                                                            isOverdue -> "¡VENCIDA! (${dateFormat.format(Date(invoice.dueDate))})"
-                                                            isDueToday -> "¡VENCE HOY!"
-                                                            else -> "Vence: ${dateFormat.format(Date(invoice.dueDate))}"
+                                            },
+                                            action = {
+                                                if (invoice.dueDate > 0) {
+                                                    Surface(
+                                                        color = when {
+                                                            invoice.isPaid -> MaterialTheme.colorScheme.surfaceVariant
+                                                            isOverdue -> Color(0xFFEF4444)
+                                                            isDueToday -> Color(0xFFF97316)
+                                                            else -> MaterialTheme.colorScheme.surfaceVariant
                                                         },
-                                                        color = if (isOverdue || isDueToday) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
+                                                        shape = RoundedCornerShape(6.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = when {
+                                                                invoice.isPaid -> "Venció: ${dateFormat.format(Date(invoice.dueDate))}"
+                                                                isOverdue -> "¡VENCIDA! (${dateFormat.format(Date(invoice.dueDate))})"
+                                                                isDueToday -> "¡VENCE HOY!"
+                                                                else -> "Vence: ${dateFormat.format(Date(invoice.dueDate))}"
+                                                            },
+                                                            color = if (isOverdue || isDueToday) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
+                                        )
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Column {
-                                                Text(
-                                                    "Proveedor: ${supplier?.name ?: "Proveedor #${invoice.supplierId}"}",
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                                if (invoice.description.isNotBlank()) {
+                                        ResponsiveActionRow(
+                                            breakpoint = 360.dp,
+                                            stackedActionAlignment = Alignment.Start,
+                                            content = {
+                                                Column {
                                                     Text(
-                                                        invoice.description,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        "Proveedor: ${supplier?.name ?: "Proveedor #${invoice.supplierId}"}",
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
                                                     )
+                                                    if (invoice.description.isNotBlank()) {
+                                                        Text(
+                                                            invoice.description,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
                                                 }
+                                            },
+                                            action = {
+                                                Text(
+                                                    "\$${String.format(Locale.US, "%.2f", invoice.totalAmount)} USD",
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    color = if (invoice.isPaid) Color(0xFF059669) else Color(0xFF1D4ED8)
+                                                )
                                             }
-
-                                            Text(
-                                                "\$${String.format(Locale.US, "%.2f", invoice.totalAmount)} USD",
-                                                fontWeight = FontWeight.Bold,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                                color = if (invoice.isPaid) Color(0xFF059669) else Color(0xFF1D4ED8)
-                                            )
-                                        }
+                                        )
 
                                         if (invoice.paymentNotes.isNotBlank()) {
                                             Text(
@@ -609,7 +654,8 @@ fun DebtsAndRemindersDialog(
                                         ) {
                                             OutlinedButton(
                                                 onClick = { selectedInvoiceForPayment = invoice },
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                                                 shape = RoundedCornerShape(8.dp)
                                             ) {
                                                 Icon(
@@ -627,7 +673,6 @@ fun DebtsAndRemindersDialog(
                         }
                     }
                 }
-            }
         }
     }
 
@@ -638,7 +683,7 @@ fun DebtsAndRemindersDialog(
         var paymentMethod by remember { mutableStateOf("Efectivo USD") }
         var paymentNotes by remember { mutableStateOf("") }
 
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { selectedSaleForPayment = null },
             title = {
                 Row(
@@ -646,8 +691,17 @@ fun DebtsAndRemindersDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Cobrar Deuda a Cliente", fontWeight = FontWeight.Bold)
-                    IconButton(onClick = { selectedSaleForPayment = null }) {
+                    Text(
+                        "Cobrar Deuda a Cliente",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    IconButton(
+                        onClick = { selectedSaleForPayment = null },
+                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    ) {
                         Icon(Icons.Filled.Close, contentDescription = "Cerrar")
                     }
                 }
@@ -660,7 +714,7 @@ fun DebtsAndRemindersDialog(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text(
-                        "Deuda Pendiente: $${String.format(Locale.US, "%.2f", pendingDebt)} USD",
+                        "Deuda Pendiente: \$${String.format(Locale.US, "%.2f", pendingDebt)} USD",
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFFDC2626),
                         fontWeight = FontWeight.Bold
@@ -669,20 +723,25 @@ fun DebtsAndRemindersDialog(
                     OutlinedTextField(
                         value = paymentAmountInput,
                         onValueChange = { paymentAmountInput = it },
-                        label = { Text("Monto a Abonar / Cobrar ($ USD)") },
+                        label = { Text("Monto a Abonar / Cobrar (\$ USD)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
 
                     Text("Método de Cobro:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         listOf("Efectivo USD", "Pago Móvil", "Transferencia / Punto").forEach { m ->
                             FilterChip(
                                 selected = paymentMethod == m,
                                 onClick = { paymentMethod = m },
-                                label = { Text(m, fontSize = 11.sp) },
-                                modifier = Modifier.weight(1f)
+                                label = { Text(m, fontSize = 11.5.sp) }
                             )
                         }
                     }
@@ -692,7 +751,9 @@ fun DebtsAndRemindersDialog(
                         onValueChange = { paymentNotes = it },
                         label = { Text("Referencia o Nota de Cobro (Opcional)") },
                         placeholder = { Text("Ej: Ref Pago Móvil #1234") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                 }
@@ -713,13 +774,17 @@ fun DebtsAndRemindersDialog(
                             }
                         }
                     },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Confirmar Cobro")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { selectedSaleForPayment = null }) {
+                TextButton(
+                    onClick = { selectedSaleForPayment = null },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
                     Text("Cancelar")
                 }
             }
@@ -731,7 +796,7 @@ fun DebtsAndRemindersDialog(
         var isPaidState by remember { mutableStateOf(!invoice.isPaid) }
         var invoiceNotes by remember { mutableStateOf(invoice.paymentNotes) }
 
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { selectedInvoiceForPayment = null },
             title = {
                 Row(
@@ -739,8 +804,17 @@ fun DebtsAndRemindersDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Estado de Factura de Compra", fontWeight = FontWeight.Bold)
-                    IconButton(onClick = { selectedInvoiceForPayment = null }) {
+                    Text(
+                        "Estado de Factura de Compra",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    IconButton(
+                        onClick = { selectedInvoiceForPayment = null },
+                        modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    ) {
                         Icon(Icons.Filled.Close, contentDescription = "Cerrar")
                     }
                 }
@@ -757,7 +831,14 @@ fun DebtsAndRemindersDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("¿Factura Pagada al Proveedor?", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(
+                            "¿Factura Pagada al Proveedor?",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp)
+                        )
                         Switch(
                             checked = isPaidState,
                             onCheckedChange = { isPaidState = it }
@@ -769,7 +850,9 @@ fun DebtsAndRemindersDialog(
                         onValueChange = { invoiceNotes = it },
                         label = { Text("Notas de pago / Referencia bancaria") },
                         placeholder = { Text("Ej: Pagado vía transferencia banco Banesco...") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                 }
@@ -786,13 +869,17 @@ fun DebtsAndRemindersDialog(
                             selectedInvoiceForPayment = null
                         }
                     },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("Guardar Cambio")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { selectedInvoiceForPayment = null }) {
+                TextButton(
+                    onClick = { selectedInvoiceForPayment = null },
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                ) {
                     Text("Cancelar")
                 }
             }

@@ -23,9 +23,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
@@ -33,12 +33,24 @@ import com.example.data.local.Product
 import com.example.data.local.ComboComponent
 import com.example.data.local.PurchaseInvoice
 import com.example.data.local.Supplier
+import androidx.compose.ui.platform.testTag
 import com.example.ui.PosViewModel
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.KeyboardAwareDialog
 import com.example.ui.components.LicenseDialog
+import com.example.ui.components.PdfExportActionDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.ResponsivePair
+import com.example.ui.components.bringIntoViewOnFocus
+import com.example.utils.PdfExportManager
+import com.example.utils.StockAlertNotificationHelper
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun InventoryScreen(viewModel: PosViewModel) {
     val context = LocalContext.current
@@ -54,17 +66,31 @@ fun InventoryScreen(viewModel: PosViewModel) {
     val maxProducts = viewModel.getMaxProductsAllowed()
     val isMinProfitMarginEnabled by viewModel.isMinProfitMarginEnabled.collectAsStateWithLifecycle()
     val minProfitMarginPercent by viewModel.minProfitMarginPercent.collectAsStateWithLifecycle()
+    val bcvRate by viewModel.bcvRate.collectAsStateWithLifecycle()
 
     var showLicenseDialog by remember { mutableStateOf(false) }
     var showLimitReachedDialog by remember { mutableStateOf(false) }
     var showImportExportDialog by remember { mutableStateOf(false) }
+    var showInventoryPdfDialog by remember { mutableStateOf(false) }
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showCsvImportDialog by remember { mutableStateOf(false) }
+    var showAlertsDialog by remember { mutableStateOf(false) }
     var editingProduct by remember { mutableStateOf<Product?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var showOnlyLowStockAlerts by remember { mutableStateOf(false) }
     var sortOption by remember { mutableStateOf("NAME_ASC") } // "NAME_ASC", "NAME_DESC", "PRICE_ASC", "PRICE_DESC", "STOCK_ASC", "STOCK_DESC"
+
+    val lowStockAlertProducts = remember(products) {
+        products
+            .filter { it.isLowStockAlertTriggered(products) }
+            .sortedWith(
+                compareBy<Product> { it.effectiveStockForAlert(products) > 1e-6 }
+                    .thenBy { it.effectiveStockForAlert(products) }
+                    .thenBy { it.name.lowercase(Locale.ROOT) }
+            )
+    }
 
     // Fast lookups for purchase invoices and suppliers
     val supplierById = remember(suppliers) { suppliers.associateBy { it.id } }
@@ -88,7 +114,8 @@ fun InventoryScreen(viewModel: PosViewModel) {
             (supplier?.documentId?.contains(searchQuery, ignoreCase = true) == true)
 
         val matchesCategory = selectedCategory == null || product.category == selectedCategory
-        matchesSearch && matchesCategory
+        val matchesLowStockFilter = !showOnlyLowStockAlerts || product.isLowStockAlertTriggered(products)
+        matchesSearch && matchesCategory && matchesLowStockFilter
     }
 
     val sortedAndFilteredProducts = remember(filteredProducts, sortOption) {
@@ -133,71 +160,147 @@ fun InventoryScreen(viewModel: PosViewModel) {
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            if (isLicensed) Icons.Filled.VerifiedUser else Icons.Filled.LockClock,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
-                        )
-                        Column {
-                            Text(
-                                text = if (isLicensed) {
-                                    "Licencia Activa: ${products.size} / ${if (isUnlimitedInventory) "Ilimitado" else "$customProductLimit prod."}"
-                                } else {
-                                    "Modo Sin Licencia: ${products.size} / 10 productos máx."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
+                ResponsiveActionRow(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    breakpoint = 340.dp,
+                    verticalSpacing = 6.dp,
+                    content = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                if (isLicensed) Icons.Filled.VerifiedUser else Icons.Filled.LockClock,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
                             )
-                            if (!isLicensed && products.size >= 10) {
+                            Column {
                                 Text(
-                                    "Límite de 10 productos alcanzado",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontWeight = FontWeight.SemiBold
+                                    text = if (isLicensed) {
+                                        "Licencia Activa: ${products.size} / ${if (isUnlimitedInventory) "Ilimitado" else "$customProductLimit prod."}"
+                                    } else {
+                                        "Modo Sin Licencia: ${products.size} / 10 productos máx."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isLicensed) Color(0xFF059669) else Color(0xFFD97706)
                                 )
+                                if (!isLicensed && products.size >= 10) {
+                                    Text(
+                                        "Límite de 10 productos alcanzado",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
+                    },
+                    action = {
+                        TextButton(
+                            onClick = { showLicenseDialog = true },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                        ) {
+                            Text(
+                                if (isLicensed) "Configurar" else "Activar Clave",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
-                    TextButton(
-                        onClick = { showLicenseDialog = true },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            if (isLicensed) "Configurar" else "Activar Clave",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                )
+            }
+
+            if (lowStockAlertProducts.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFEF4444).copy(alpha = 0.10f),
+                    border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.35f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .testTag("inventory_low_stock_banner")
+                ) {
+                    ResponsiveActionRow(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        breakpoint = 340.dp,
+                        verticalSpacing = 6.dp,
+                        content = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = Color(0xFFDC2626),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "${lowStockAlertProducts.size} producto(s) en stock mínimo o agotado",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFDC2626)
+                                    )
+                                    Text(
+                                        text = lowStockAlertProducts.take(2).joinToString(", ") { it.name } +
+                                            if (lowStockAlertProducts.size > 2) " y ${lowStockAlertProducts.size - 2} más" else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        },
+                        action = {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(
+                                    onClick = { showOnlyLowStockAlerts = !showOnlyLowStockAlerts },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                                ) {
+                                    Text(
+                                        if (showOnlyLowStockAlerts) "Ver todos" else "Filtrar",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                TextButton(
+                                    onClick = { showAlertsDialog = true },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                                ) {
+                                    Text(
+                                        "Alertas",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFDC2626)
+                                    )
+                                }
+                            }
+                        }
+                    )
                 }
             }
 
             // Actions bar (Export/Import buttons)
-            Row(
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Button(
                     onClick = { showCsvImportDialog = true },
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                 ) {
                     Icon(Icons.Filled.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
@@ -207,11 +310,32 @@ fun InventoryScreen(viewModel: PosViewModel) {
                 OutlinedButton(
                     onClick = { showImportExportDialog = true },
                     shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                 ) {
                     Icon(Icons.Filled.ImportExport, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Exportar / Respaldos", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = { showInventoryPdfDialog = true },
+                    enabled = sortedAndFilteredProducts.isNotEmpty(),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(
+                        1.dp,
+                        if (sortedAndFilteredProducts.isNotEmpty()) Color(0xFFDC2626).copy(alpha = 0.45f)
+                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    ),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("inventory_export_pdf_button")
+                ) {
+                    Icon(Icons.Filled.PictureAsPdf, contentDescription = "Exportar inventario en PDF", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Exportar PDF", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -231,6 +355,7 @@ fun InventoryScreen(viewModel: PosViewModel) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .bringIntoViewOnFocus()
             )
 
             // Categorías y Filtros de Ordenación
@@ -251,6 +376,23 @@ fun InventoryScreen(viewModel: PosViewModel) {
                             onClick = { selectedCategory = null },
                             label = { Text("Todas las cat.") }
                         )
+                    }
+                    if (lowStockAlertProducts.isNotEmpty() || showOnlyLowStockAlerts) {
+                        item {
+                            FilterChip(
+                                selected = showOnlyLowStockAlerts,
+                                onClick = { showOnlyLowStockAlerts = !showOnlyLowStockAlerts },
+                                label = { Text("Stock Mínimo (${lowStockAlertProducts.size})") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Filled.Warning,
+                                        contentDescription = null,
+                                        tint = if (showOnlyLowStockAlerts) MaterialTheme.colorScheme.error else Color(0xFFD97706),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            )
+                        }
                     }
                     items(categories) { cat ->
                         FilterChip(
@@ -345,6 +487,16 @@ fun InventoryScreen(viewModel: PosViewModel) {
                             onAddStock = {
                                 viewModel.updateProduct(product.copy(stock = product.stock + 1))
                             },
+                            onToggleStockAlert = {
+                                val nextEnabled = !product.isLowStockAlertEnabled
+                                viewModel.setProductStockAlert(product, nextEnabled)
+                                Toast.makeText(
+                                    context,
+                                    if (nextEnabled) "Alerta activada para ${product.name}"
+                                    else "Alerta desactivada (no importante): ${product.name}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
                             onEditClick = {
                                 if (canEdit) {
                                     editingProduct = product
@@ -366,7 +518,7 @@ fun InventoryScreen(viewModel: PosViewModel) {
             isMinProfitMarginEnabled = isMinProfitMarginEnabled,
             minProfitMarginPercent = minProfitMarginPercent,
             onDismiss = { showAddDialog = false },
-            onConfirm = { code, name, cat, price, stock, costPrice, invoiceNum, isTaxExempt, hasCommission, commissionPercentage, commissionAmountUsd, isRecipe, isCombo, comboItemsJson, aisleNumber, aisleQty, depotQty, counterQty, allowDecimal, priceModifiable, wholesalePrice ->
+            onConfirm = { code, name, cat, price, stock, costPrice, invoiceNum, isTaxExempt, hasCommission, commissionPercentage, commissionAmountUsd, isRecipe, isCombo, comboItemsJson, aisleNumber, aisleQty, depotQty, counterQty, allowDecimal, priceModifiable, wholesalePrice, minStockAlertQty, isLowStockAlertEnabled ->
                 val added = viewModel.addProduct(
                     code = code,
                     name = name,
@@ -389,6 +541,8 @@ fun InventoryScreen(viewModel: PosViewModel) {
                     allowDecimalQuantity = allowDecimal,
                     isPriceModifiable = priceModifiable,
                     wholesalePriceUsd = wholesalePrice,
+                    minStockAlertQuantity = minStockAlertQty,
+                    isLowStockAlertEnabled = isLowStockAlertEnabled,
                     onError = { errorMsg ->
                         Toast.makeText(context, errorMsg, Toast.LENGTH_LONG).show()
                     },
@@ -404,7 +558,7 @@ fun InventoryScreen(viewModel: PosViewModel) {
     }
 
     if (showLimitReachedDialog) {
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { showLimitReachedDialog = false },
             icon = { Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
             title = {
@@ -469,6 +623,62 @@ fun InventoryScreen(viewModel: PosViewModel) {
         )
     }
 
+    if (showInventoryPdfDialog) {
+        val sortLabel = when (sortOption) {
+            "NAME_ASC" -> "Nombre A-Z"
+            "NAME_DESC" -> "Nombre Z-A"
+            "PRICE_DESC" -> "Precio Mayor"
+            "PRICE_ASC" -> "Precio Menor"
+            "STOCK_DESC" -> "Stock Mayor"
+            "STOCK_ASC" -> "Stock Menor"
+            else -> "Nombre A-Z"
+        }
+        val filterParts = buildList {
+            if (selectedCategory != null) add("Cat: $selectedCategory")
+            if (searchQuery.isNotBlank()) add("Búsqueda: \"$searchQuery\"")
+        }
+        val activeFilterLabel = if (filterParts.isEmpty()) {
+            "Todo el inventario ($sortLabel)"
+        } else {
+            "${filterParts.joinToString(" • ")} ($sortLabel)"
+        }
+        val fileDateTag = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+        PdfExportActionDialog(
+            title = "Exportar Inventario en PDF",
+            subtitle = "${sortedAndFilteredProducts.size} productos • $activeFilterLabel",
+            suggestedFileName = "Inventario_$fileDateTag.pdf",
+            generatePdf = {
+                PdfExportManager.generateInventoryPdf(
+                    context = context,
+                    prefs = viewModel.prefs,
+                    products = sortedAndFilteredProducts,
+                    allProducts = products,
+                    effectiveRate = bcvRate,
+                    filterLabel = activeFilterLabel,
+                    generatedBy = currentUser?.username.orEmpty()
+                )
+            },
+            onDismiss = { showInventoryPdfDialog = false }
+        )
+    }
+
+    if (showAlertsDialog) {
+        InventoryAlertsDialog(
+            lowStockProducts = lowStockAlertProducts,
+            allProducts = products,
+            canManageAlerts = canEdit,
+            onDisableProductAlert = { p ->
+                viewModel.setProductStockAlert(p, enabled = false)
+                Toast.makeText(context, "Alerta desactivada para ${p.name}", Toast.LENGTH_SHORT).show()
+            },
+            onEditProduct = if (canEdit) { p ->
+                showAlertsDialog = false
+                editingProduct = p
+            } else null,
+            onDismiss = { showAlertsDialog = false }
+        )
+    }
+
     editingProduct?.let { prod ->
         ProductFormDialog(
             initialProduct = prod,
@@ -478,7 +688,7 @@ fun InventoryScreen(viewModel: PosViewModel) {
             isMinProfitMarginEnabled = isMinProfitMarginEnabled,
             minProfitMarginPercent = minProfitMarginPercent,
             onDismiss = { editingProduct = null },
-            onConfirm = { code, name, cat, price, stock, costPrice, invoiceNum, isTaxExempt, hasCommission, commissionPercentage, commissionAmountUsd, isRecipe, isCombo, comboItemsJson, aisleNumber, aisleQty, depotQty, counterQty, allowDecimal, priceModifiable, wholesalePrice ->
+            onConfirm = { code, name, cat, price, stock, costPrice, invoiceNum, isTaxExempt, hasCommission, commissionPercentage, commissionAmountUsd, isRecipe, isCombo, comboItemsJson, aisleNumber, aisleQty, depotQty, counterQty, allowDecimal, priceModifiable, wholesalePrice, minStockAlertQty, isLowStockAlertEnabled ->
                 viewModel.updateProduct(
                     prod.copy(
                         code = code,
@@ -501,7 +711,9 @@ fun InventoryScreen(viewModel: PosViewModel) {
                         counterQuantity = counterQty,
                         allowDecimalQuantity = allowDecimal,
                         isPriceModifiable = priceModifiable,
-                        wholesalePriceUsd = wholesalePrice
+                        wholesalePriceUsd = wholesalePrice,
+                        minStockAlertQuantity = minStockAlertQty,
+                        isLowStockAlertEnabled = if (isRecipe) false else isLowStockAlertEnabled
                     )
                 )
                 editingProduct = null
@@ -510,6 +722,7 @@ fun InventoryScreen(viewModel: PosViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProductItem(
     product: Product,
@@ -517,6 +730,7 @@ fun ProductItem(
     supplier: Supplier?,
     canEdit: Boolean,
     onAddStock: () -> Unit,
+    onToggleStockAlert: () -> Unit,
     onEditClick: () -> Unit
 ) {
     val effectiveCost = if (product.isCombo) product.calculateCalculatedCostFromComponents(allProducts) else product.costPriceUsd
@@ -540,31 +754,40 @@ fun ProductItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = product.name,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = product.code.ifBlank { "SIN CÓDIGO" },
-                                style = MaterialTheme.typography.labelSmall,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = product.name,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Cód: ${product.code.ifBlank { "SIN CÓDIGO" }}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         Text(
                             text = product.category.ifBlank { "General" },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.align(Alignment.CenterVertically)
                         )
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -635,6 +858,8 @@ fun ProductItem(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val isAlertTriggered = product.isLowStockAlertTriggered(allProducts)
+                    val isOutOfStock = product.isOutOfStockAlertTriggered(allProducts)
                     if (product.isRecipe) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
@@ -650,34 +875,81 @@ fun ProductItem(
                             )
                         }
                     } else if (product.isCombo) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF8B5CF6).copy(alpha = 0.12f),
-                            border = BorderStroke(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.3f))
-                        ) {
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (isAlertTriggered) Color(0xFFEF4444).copy(alpha = 0.12f) else Color(0xFF8B5CF6).copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, if (isAlertTriggered) Color(0xFFEF4444).copy(alpha = 0.35f) else Color(0xFF8B5CF6).copy(alpha = 0.3f))
+                            ) {
+                                Text(
+                                    text = "Combo Disp: $comboStock",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isAlertTriggered) Color(0xFFDC2626) else Color(0xFF7C3AED),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
                             Text(
-                                text = "Combo Disp: $comboStock",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color(0xFF7C3AED),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                text = if (product.isLowStockAlertEnabled) {
+                                    "Mín alerta: ${StockAlertNotificationHelper.formatStockQuantity(product.minStockAlertQuantity)}"
+                                } else {
+                                    "Sin alerta"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isAlertTriggered) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     } else {
-                        if (product.stock <= 5) {
+                        if (isAlertTriggered) {
                             Icon(
                                 Icons.Filled.Warning,
-                                contentDescription = "Stock Bajo",
-                                tint = Color(0xFFEF4444),
+                                contentDescription = if (isOutOfStock) "Producto Agotado" else "Stock Mínimo Alcanzado",
+                                tint = if (isOutOfStock) Color(0xFFDC2626) else Color(0xFFD97706),
                                 modifier = Modifier.padding(end = 6.dp).size(20.dp)
                             )
                         }
-                        Text(
-                            text = "Stock: ${product.stock}",
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(end = 10.dp)
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            modifier = Modifier.padding(end = 6.dp)
+                        ) {
+                            Text(
+                                text = "Stock: ${StockAlertNotificationHelper.formatStockQuantity(product.stock)}",
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isAlertTriggered) {
+                                    if (isOutOfStock) Color(0xFFDC2626) else Color(0xFFD97706)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                            Text(
+                                text = if (product.isLowStockAlertEnabled) {
+                                    "Mín alerta: ${StockAlertNotificationHelper.formatStockQuantity(product.minStockAlertQuantity)}"
+                                } else {
+                                    "Sin alerta"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isAlertTriggered) Color(0xFFDC2626) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         if (canEdit) {
+                            IconButton(
+                                onClick = onToggleStockAlert,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("toggle_stock_alert_${product.id}")
+                            ) {
+                                Icon(
+                                    imageVector = if (product.isLowStockAlertEnabled) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
+                                    contentDescription = if (product.isLowStockAlertEnabled) "Quitar alerta (no importante)" else "Activar alerta de stock mínimo",
+                                    tint = if (product.isLowStockAlertEnabled) {
+                                        if (isAlertTriggered) Color(0xFFDC2626) else MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    },
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
                             FilledTonalIconButton(onClick = onAddStock, modifier = Modifier.size(36.dp)) {
                                 Icon(Icons.Filled.Add, contentDescription = "Aumentar Stock", modifier = Modifier.size(18.dp))
                             }
@@ -890,7 +1162,7 @@ fun ProductItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ProductFormDialog(
     initialProduct: Product?,
@@ -921,7 +1193,9 @@ fun ProductFormDialog(
         counterQuantity: Double,
         allowDecimalQuantity: Boolean,
         isPriceModifiable: Boolean,
-        wholesalePrice: Double
+        wholesalePrice: Double,
+        minStockAlertQuantity: Double,
+        isLowStockAlertEnabled: Boolean
     ) -> Unit
 ) {
     var code by remember { mutableStateOf(initialProduct?.code ?: "") }
@@ -952,6 +1226,12 @@ fun ProductFormDialog(
     var isSalePriceManuallyEdited by remember { mutableStateOf(initialProduct != null && initialProduct.priceUsd > 0) }
     var wholesalePriceStr by remember { mutableStateOf(if (initialProduct != null && initialProduct.wholesalePriceUsd > 0) initialProduct.wholesalePriceUsd.toString() else "") }
     var stockStr by remember { mutableStateOf(if (initialProduct != null) initialProduct.stock.toString() else "") }
+    var isLowStockAlertEnabled by remember { mutableStateOf(initialProduct?.isLowStockAlertEnabled ?: true) }
+    var minStockAlertStr by remember {
+        mutableStateOf(
+            StockAlertNotificationHelper.formatStockQuantity(initialProduct?.minStockAlertQuantity ?: 5.0)
+        )
+    }
     
     var enableInvoiceSection by remember { mutableStateOf(initialProduct?.invoiceNumber?.isNotBlank() == true) }
     var invoiceNumber by remember { mutableStateOf(initialProduct?.invoiceNumber ?: "") }
@@ -1051,18 +1331,15 @@ fun ProductFormDialog(
     val wholesaleMarginOnCostPercent = if (costPrice > 0.0 && wholesalePrice > 0.0) (wholesaleProfitPerUnit / costPrice) * 100.0 else 0.0
 
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 16.dp)
-        ) {
+    KeyboardAwareDialog(
+        onDismissRequest = onDismiss,
+        maxWidth = 600.dp,
+        shape = RoundedCornerShape(20.dp),
+        tonalElevation = 8.dp
+    ) {
             Column(
                 modifier = Modifier
-                    .padding(20.dp)
+                    .padding(18.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -1088,9 +1365,10 @@ fun ProductFormDialog(
 
                 // Type Selector Chips (Estándar, Receta, Combo)
                 Text("Tipo de Producto:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     FilterChip(
                         selected = !isRecipe && !isCombo,
@@ -1099,8 +1377,7 @@ fun ProductFormDialog(
                             isCombo = false
                         },
                         label = { Text("Estándar") },
-                        leadingIcon = { Icon(Icons.Filled.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                        modifier = Modifier.weight(1f)
+                        leadingIcon = { Icon(Icons.Filled.Inventory2, contentDescription = null, modifier = Modifier.size(16.dp)) }
                     )
                     FilterChip(
                         selected = isRecipe,
@@ -1109,8 +1386,7 @@ fun ProductFormDialog(
                             isCombo = false
                         },
                         label = { Text("Receta") },
-                        leadingIcon = { Icon(Icons.Filled.RestaurantMenu, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                        modifier = Modifier.weight(1f)
+                        leadingIcon = { Icon(Icons.Filled.RestaurantMenu, contentDescription = null, modifier = Modifier.size(16.dp)) }
                     )
                     FilterChip(
                         selected = isCombo,
@@ -1119,8 +1395,7 @@ fun ProductFormDialog(
                             isCombo = true
                         },
                         label = { Text("Combo") },
-                        leadingIcon = { Icon(Icons.Filled.LocalOffer, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                        modifier = Modifier.weight(1f)
+                        leadingIcon = { Icon(Icons.Filled.LocalOffer, contentDescription = null, modifier = Modifier.size(16.dp)) }
                     )
                 }
 
@@ -1130,32 +1405,35 @@ fun ProductFormDialog(
                     label = { Text("Nombre del Producto *") },
                     leadingIcon = { Icon(Icons.Filled.ShoppingBag, contentDescription = null) },
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = code,
-                        onValueChange = { code = it },
-                        label = { Text("Código / SKU") },
-                        placeholder = { Text("Opcional") },
-                        leadingIcon = { Icon(Icons.Filled.QrCode, contentDescription = null) },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    OutlinedTextField(
-                        value = category,
-                        onValueChange = { category = it },
-                        label = { Text("Categoría") },
-                        leadingIcon = { Icon(Icons.Filled.Category, contentDescription = null) },
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                ResponsivePair(
+                    breakpoint = 340.dp,
+                    horizontalSpacing = 8.dp,
+                    verticalSpacing = 8.dp,
+                    first = { mod ->
+                        OutlinedTextField(
+                            value = code,
+                            onValueChange = { code = it },
+                            label = { Text("Código / SKU") },
+                            placeholder = { Text("Opcional") },
+                            leadingIcon = { Icon(Icons.Filled.QrCode, contentDescription = null) },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = mod.bringIntoViewOnFocus()
+                        )
+                    },
+                    second = { mod ->
+                        OutlinedTextField(
+                            value = category,
+                            onValueChange = { category = it },
+                            label = { Text("Categoría") },
+                            leadingIcon = { Icon(Icons.Filled.Category, contentDescription = null) },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = mod.bringIntoViewOnFocus()
+                        )
+                    }
+                )
 
                 if (isCombo) {
                     // COMBO BUILDER SECTION
@@ -1329,87 +1607,97 @@ fun ProductFormDialog(
                         }
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = salePriceStr,
-                            onValueChange = {
-                                salePriceStr = it
-                                isSalePriceManuallyEdited = it.isNotBlank()
-                            },
-                            label = { Text("Precio Venta Combo ($) *") },
-                            leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = wholesalePriceStr,
-                            onValueChange = { wholesalePriceStr = it },
-                            label = { Text("Precio al Mayor ($)") },
-                            placeholder = { Text("Opcional") },
-                            leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    ResponsivePair(
+                        breakpoint = 340.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 8.dp,
+                        first = { mod ->
+                            OutlinedTextField(
+                                value = salePriceStr,
+                                onValueChange = {
+                                    salePriceStr = it
+                                    isSalePriceManuallyEdited = it.isNotBlank()
+                                },
+                                label = { Text("Precio Venta Combo ($) *") },
+                                leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        },
+                        second = { mod ->
+                            OutlinedTextField(
+                                value = wholesalePriceStr,
+                                onValueChange = { wholesalePriceStr = it },
+                                label = { Text("Precio al Mayor ($)") },
+                                placeholder = { Text("Opcional") },
+                                leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        }
+                    )
                 } else if (!isRecipe) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = salePriceStr,
-                            onValueChange = {
-                                salePriceStr = it
-                                isSalePriceManuallyEdited = it.isNotBlank()
-                            },
-                            label = { Text("Precio de Venta ($) *") },
-                            leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
+                    ResponsivePair(
+                        breakpoint = 340.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 8.dp,
+                        first = { mod ->
+                            OutlinedTextField(
+                                value = salePriceStr,
+                                onValueChange = {
+                                    salePriceStr = it
+                                    isSalePriceManuallyEdited = it.isNotBlank()
+                                },
+                                label = { Text("Precio de Venta ($) *") },
+                                leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        },
+                        second = { mod ->
+                            OutlinedTextField(
+                                value = wholesalePriceStr,
+                                onValueChange = { wholesalePriceStr = it },
+                                label = { Text("Precio al Mayor ($)") },
+                                placeholder = { Text("Opcional") },
+                                leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        }
+                    )
 
-                        OutlinedTextField(
-                            value = wholesalePriceStr,
-                            onValueChange = { wholesalePriceStr = it },
-                            label = { Text("Precio al Mayor ($)") },
-                            placeholder = { Text("Opcional") },
-                            leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = costPriceStr,
-                            onValueChange = { costPriceStr = it },
-                            label = { Text("Precio Costo ($)") },
-                            leadingIcon = { Icon(Icons.Filled.MoneyOff, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        OutlinedTextField(
-                            value = stockStr,
-                            onValueChange = { stockStr = it },
-                            label = { Text("Existencias / Stock inicial") },
-                            leadingIcon = { Icon(Icons.Filled.Inventory2, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    ResponsivePair(
+                        breakpoint = 340.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 8.dp,
+                        first = { mod ->
+                            OutlinedTextField(
+                                value = costPriceStr,
+                                onValueChange = { costPriceStr = it },
+                                label = { Text("Precio Costo ($)") },
+                                leadingIcon = { Icon(Icons.Filled.MoneyOff, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        },
+                        second = { mod ->
+                            OutlinedTextField(
+                                value = stockStr,
+                                onValueChange = { stockStr = it },
+                                label = { Text("Existencias / Stock inicial") },
+                                leadingIcon = { Icon(Icons.Filled.Inventory2, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        }
+                    )
 
                     if (initialProduct == null && isMinProfitMarginEnabled && minProfitMarginPercent > 0.0) {
                         Surface(
@@ -1434,15 +1722,16 @@ fun ProductFormDialog(
                     }
 
                     // Quick Margin Presets
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
                             "Margen rápido:",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.align(Alignment.CenterVertically)
                         )
                         listOf(20, 30, 40, 50, 100).forEach { pct ->
                             SuggestionChip(
@@ -1455,7 +1744,7 @@ fun ProductFormDialog(
                                 },
                                 label = { Text("+$pct%", fontSize = 11.sp) },
                                 enabled = costPrice > 0,
-                                modifier = Modifier.height(28.dp)
+                                modifier = Modifier.height(30.dp)
                             )
                         }
                     }
@@ -1576,30 +1865,144 @@ fun ProductFormDialog(
                     }
                 } else {
                     // Modo Receta / Servicio: Solo precio de venta y mayor
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = salePriceStr,
-                            onValueChange = { salePriceStr = it },
-                            label = { Text("Precio de Venta ($) *") },
-                            leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
+                    ResponsivePair(
+                        breakpoint = 340.dp,
+                        horizontalSpacing = 10.dp,
+                        verticalSpacing = 8.dp,
+                        first = { mod ->
+                            OutlinedTextField(
+                                value = salePriceStr,
+                                onValueChange = { salePriceStr = it },
+                                label = { Text("Precio de Venta ($) *") },
+                                leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        },
+                        second = { mod ->
+                            OutlinedTextField(
+                                value = wholesalePriceStr,
+                                onValueChange = { wholesalePriceStr = it },
+                                label = { Text("Precio al Mayor ($)") },
+                                placeholder = { Text("Opcional") },
+                                leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = mod.bringIntoViewOnFocus()
+                            )
+                        }
+                    )
+                }
 
-                        OutlinedTextField(
-                            value = wholesalePriceStr,
-                            onValueChange = { wholesalePriceStr = it },
-                            label = { Text("Precio al Mayor ($)") },
-                            placeholder = { Text("Opcional") },
-                            leadingIcon = { Icon(Icons.Filled.Payments, contentDescription = null) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.weight(1f)
-                        )
+                // Alerta de Stock Mínimo por Producto
+                if (!isRecipe) {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isLowStockAlertEnabled) {
+                                Color(0xFFF59E0B).copy(alpha = 0.10f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                            }
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isLowStockAlertEnabled) {
+                                Color(0xFFD97706).copy(alpha = 0.4f)
+                            } else {
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+                            }
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isLowStockAlertEnabled) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
+                                        contentDescription = null,
+                                        tint = if (isLowStockAlertEnabled) Color(0xFFD97706) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Alerta de Stock Mínimo",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        Text(
+                                            text = if (isLowStockAlertEnabled) {
+                                                "Avisar automáticamente cuando el stock baje al mínimo"
+                                            } else {
+                                                "Desactivada (producto no importante)"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = isLowStockAlertEnabled,
+                                    onCheckedChange = { isLowStockAlertEnabled = it },
+                                    modifier = Modifier.testTag("product_low_stock_alert_switch")
+                                )
+                            }
+
+                            AnimatedVisibility(visible = isLowStockAlertEnabled) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = minStockAlertStr,
+                                        onValueChange = { minStockAlertStr = it },
+                                        label = { Text("Cantidad mínima antes de alertar") },
+                                        placeholder = { Text("Ej: 5") },
+                                        leadingIcon = { Icon(Icons.Filled.Warning, contentDescription = null) },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .bringIntoViewOnFocus()
+                                            .testTag("product_min_stock_input")
+                                    )
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Mínimos rápidos:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.align(Alignment.CenterVertically)
+                                        )
+                                        listOf("1", "3", "5", "10", "20", "50").forEach { qtyPreset ->
+                                            SuggestionChip(
+                                                onClick = { minStockAlertStr = qtyPreset },
+                                                label = { Text(qtyPreset, fontSize = 11.sp) },
+                                                modifier = Modifier.height(30.dp)
+                                            )
+                                        }
+                                    }
+                                    val previewMin = minStockAlertStr.replace(",", ".").toDoubleOrNull()?.coerceAtLeast(0.0) ?: 5.0
+                                    Text(
+                                        text = "El sistema emitirá una alerta automática cuando queden ${StockAlertNotificationHelper.formatStockQuantity(previewMin)} o menos unidades.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color(0xFFB45309)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1657,31 +2060,38 @@ fun ProductFormDialog(
                                     onValueChange = { aisleNumber = it },
                                     label = { Text("Número de Pasillo") },
                                     leadingIcon = { Icon(Icons.Filled.Place, contentDescription = null) },
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                                 )
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(
-                                        value = aisleQuantityStr,
-                                        onValueChange = { aisleQuantityStr = it },
-                                        label = { Text("Stock Pasillo") },
-                                        modifier = Modifier.weight(1f),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                    )
-                                    OutlinedTextField(
-                                        value = depotQuantityStr,
-                                        onValueChange = { depotQuantityStr = it },
-                                        label = { Text("Stock Depósito") },
-                                        modifier = Modifier.weight(1f),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                    )
-                                    OutlinedTextField(
-                                        value = counterQuantityStr,
-                                        onValueChange = { counterQuantityStr = it },
-                                        label = { Text("Stock Mostrador") },
-                                        modifier = Modifier.weight(1f),
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                                    )
-                                }
+                                ResponsivePair(
+                                    breakpoint = 320.dp,
+                                    horizontalSpacing = 8.dp,
+                                    verticalSpacing = 8.dp,
+                                    first = { mod ->
+                                        OutlinedTextField(
+                                            value = aisleQuantityStr,
+                                            onValueChange = { aisleQuantityStr = it },
+                                            label = { Text("Stock Pasillo") },
+                                            modifier = mod.bringIntoViewOnFocus(),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
+                                    },
+                                    second = { mod ->
+                                        OutlinedTextField(
+                                            value = depotQuantityStr,
+                                            onValueChange = { depotQuantityStr = it },
+                                            label = { Text("Stock Depósito") },
+                                            modifier = mod.bringIntoViewOnFocus(),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
+                                    }
+                                )
+                                OutlinedTextField(
+                                    value = counterQuantityStr,
+                                    onValueChange = { counterQuantityStr = it },
+                                    label = { Text("Stock Mostrador") },
+                                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                )
                             }
                         }
                     }
@@ -1890,23 +2300,22 @@ fun ProductFormDialog(
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
                                 HorizontalDivider(color = Color(0xFF6366F1).copy(alpha = 0.2f))
 
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     FilterChip(
                                         selected = commissionMode == "PERCENT",
                                         onClick = { commissionMode = "PERCENT" },
                                         label = { Text("% Porcentaje") },
-                                        leadingIcon = { Icon(Icons.Filled.Percent, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                        modifier = Modifier.weight(1f)
+                                        leadingIcon = { Icon(Icons.Filled.Percent, contentDescription = null, modifier = Modifier.size(16.dp)) }
                                     )
                                     FilterChip(
                                         selected = commissionMode == "FIXED",
                                         onClick = { commissionMode = "FIXED" },
                                         label = { Text("\$ Monto Fijo") },
-                                        leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                                        modifier = Modifier.weight(1f)
+                                        leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null, modifier = Modifier.size(16.dp)) }
                                     )
                                 }
 
@@ -1919,12 +2328,13 @@ fun ProductFormDialog(
                                         leadingIcon = { Icon(Icons.Filled.Percent, contentDescription = null) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                                     )
 
-                                    Row(
+                                    FlowRow(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         listOf("2", "5", "8", "10", "15").forEach { pct ->
                                             SuggestionChip(
@@ -1942,7 +2352,7 @@ fun ProductFormDialog(
                                         leadingIcon = { Icon(Icons.Filled.AttachMoney, contentDescription = null) },
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                         shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                                     )
                                 }
 
@@ -2043,15 +2453,17 @@ fun ProductFormDialog(
                     }
                 }
 
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    ) {
                         Text("Cancelar")
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             if (name.isNotBlank() && salePrice > 0 && (!isCombo || comboComponents.isNotEmpty())) {
@@ -2080,17 +2492,19 @@ fun ProductFormDialog(
                                     if (enableLocationSection) counterQuantityStr.replace(",", ".").toDoubleOrNull() ?: 0.0 else 0.0,
                                     allowDecimalQuantity,
                                     isPriceModifiable,
-                                    wholesalePrice
+                                    wholesalePrice,
+                                    (minStockAlertStr.replace(",", ".").toDoubleOrNull() ?: 5.0).coerceAtLeast(0.0),
+                                    if (isRecipe) false else isLowStockAlertEnabled
                                 )
                             }
                         },
                         enabled = name.isNotBlank() && salePrice > 0 && (!isCombo || comboComponents.isNotEmpty()),
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                     ) {
                         Text(if (initialProduct == null) "Guardar Producto" else "Actualizar Producto")
                     }
                 }
             }
-        }
     }
 }

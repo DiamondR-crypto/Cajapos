@@ -21,5 +21,6 @@ data class DeliveryNote(
     val rateBcv: Double = 1.0,
     val status: String = "ENTREGADO", // "ENTREGADO", "FACTURADO", "ANULADO"
     val cashierName: String = "",
-    val cashRegisterNumber: String = ""
+    val cashRegisterNumber: String = "",
+    val displayCurrency: String = "USD" // "USD" o "BS"
 )

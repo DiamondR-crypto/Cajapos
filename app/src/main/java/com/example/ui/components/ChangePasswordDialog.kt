@@ -25,8 +25,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.PosViewModel
 
@@ -57,42 +55,35 @@ fun ChangePasswordDialog(
     val passwordsMatch = newPassword.isNotEmpty() && confirmPassword.isNotEmpty() && newPassword == confirmPassword
     val passwordsMismatch = confirmPassword.isNotEmpty() && newPassword != confirmPassword
 
-    Dialog(
+    KeyboardAwareDialog(
         onDismissRequest = {
             if (!isLoading) onDismissRequest()
         },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        dismissOnClickOutside = !isLoading,
+        maxWidth = 500.dp,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 8.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+        modifier = Modifier.testTag("change_password_dialog")
     ) {
-        Card(
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .widthIn(max = 500.dp)
-                .padding(16.dp)
-                .testTag("change_password_dialog"),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
-            ),
-            elevation = CardDefaults.cardElevation(12.dp),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                .fillMaxWidth()
+                .padding(20.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState())
-                    .imePadding(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Header
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.primaryContainer,
@@ -191,6 +182,7 @@ fun ChangePasswordDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .bringIntoViewOnFocus()
                         .testTag("current_password_input")
                 )
 
@@ -223,6 +215,7 @@ fun ChangePasswordDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .bringIntoViewOnFocus()
                         .testTag("new_password_input")
                 )
 
@@ -293,6 +286,7 @@ fun ChangePasswordDialog(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .bringIntoViewOnFocus()
                         .testTag("confirm_password_input")
                 )
 
@@ -326,79 +320,80 @@ fun ChangePasswordDialog(
                 Spacer(modifier = Modifier.height(4.dp))
 
                 // Action Buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onDismissRequest,
-                        enabled = !isLoading,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Cancelar")
-                    }
-
-                    Button(
-                        onClick = {
-                            if (currentPassword.isBlank()) {
-                                errorMessage = "Ingrese la contraseña actual"
-                                return@Button
-                            }
-                            if (newPassword.isBlank()) {
-                                errorMessage = "Ingrese la nueva contraseña"
-                                return@Button
-                            }
-                            if (newPassword != confirmPassword) {
-                                errorMessage = "La confirmación y la nueva contraseña deben coincidir exactamente"
-                                return@Button
-                            }
-                            if (newPassword.length < 4) {
-                                errorMessage = "La nueva contraseña debe tener al menos 4 caracteres"
-                                return@Button
-                            }
-
-                            isLoading = true
-                            errorMessage = ""
-                            viewModel.changeCloudPassword(
-                                currentPass = currentPassword,
-                                newPass = newPassword,
-                                confirmPass = confirmPassword
-                            ) { success, msg ->
-                                isLoading = false
-                                if (success) {
-                                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                                    onDismissRequest()
-                                } else {
-                                    errorMessage = msg
+                ResponsivePair(
+                    breakpoint = 380.dp,
+                    horizontalSpacing = 10.dp,
+                    verticalSpacing = 10.dp,
+                    firstWeight = 1f,
+                    secondWeight = 1.4f,
+                    first = { mod ->
+                        OutlinedButton(
+                            onClick = onDismissRequest,
+                            enabled = !isLoading,
+                            modifier = mod.defaultMinSize(minHeight = 48.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Cancelar")
+                        }
+                    },
+                    second = { mod ->
+                        Button(
+                            onClick = {
+                                if (currentPassword.isBlank()) {
+                                    errorMessage = "Ingrese la contraseña actual"
+                                    return@Button
                                 }
+                                if (newPassword.isBlank()) {
+                                    errorMessage = "Ingrese la nueva contraseña"
+                                    return@Button
+                                }
+                                if (newPassword != confirmPassword) {
+                                    errorMessage = "La confirmación y la nueva contraseña deben coincidir exactamente"
+                                    return@Button
+                                }
+                                if (newPassword.length < 4) {
+                                    errorMessage = "La nueva contraseña debe tener al menos 4 caracteres"
+                                    return@Button
+                                }
+
+                                isLoading = true
+                                errorMessage = ""
+                                viewModel.changeCloudPassword(
+                                    currentPass = currentPassword,
+                                    newPass = newPassword,
+                                    confirmPass = confirmPassword
+                                ) { success, msg ->
+                                    isLoading = false
+                                    if (success) {
+                                        Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                                        onDismissRequest()
+                                    } else {
+                                        errorMessage = msg
+                                    }
+                                }
+                            },
+                            enabled = !isLoading && currentPassword.isNotBlank() && newPassword.isNotBlank() && confirmPassword.isNotBlank() && passwordsMatch,
+                            modifier = mod
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("submit_change_password_button"),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Guardando...")
+                            } else {
+                                Icon(Icons.Filled.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Cambiar Contraseña")
                             }
-                        },
-                        enabled = !isLoading && currentPassword.isNotBlank() && newPassword.isNotBlank() && confirmPassword.isNotBlank() && passwordsMatch,
-                        modifier = Modifier
-                            .weight(1.4f)
-                            .height(48.dp)
-                            .testTag("submit_change_password_button"),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Guardando...")
-                        } else {
-                            Icon(Icons.Filled.Save, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Cambiar Contraseña")
                         }
                     }
-                }
+                )
             }
         }
     }
-}

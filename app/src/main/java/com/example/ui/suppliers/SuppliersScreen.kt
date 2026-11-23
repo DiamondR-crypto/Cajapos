@@ -28,10 +28,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.PurchaseInvoice
 import com.example.data.local.Supplier
 import com.example.ui.PosViewModel
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.bringIntoViewOnFocus
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SuppliersScreen(viewModel: PosViewModel) {
     val suppliers by viewModel.allSuppliers.collectAsStateWithLifecycle()
@@ -81,6 +84,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .bringIntoViewOnFocus()
             )
 
             if (filteredSuppliers.isEmpty()) {
@@ -110,38 +114,39 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
-                                Row(
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = supplier.name,
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                        Text(
-                                            text = "RIF / CI: ${supplier.documentId}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
+                                ResponsiveActionRow(
+                                    breakpoint = 320.dp,
+                                    stackedActionAlignment = Alignment.End,
+                                    content = {
+                                        Column {
+                                            Text(
+                                                text = supplier.name,
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
+                                            Text(
+                                                text = "RIF / CI: ${supplier.documentId}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    },
+                                    action = {
+                                        Button(
+                                            onClick = {
+                                                selectedSupplierId = supplier.id
+                                                showInvoiceDialog = true
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(6.dp))
+                                            Text("Cargar Factura", fontSize = 13.sp)
+                                        }
                                     }
-
-                                    Button(
-                                        onClick = {
-                                            selectedSupplierId = supplier.id
-                                            showInvoiceDialog = true
-                                        },
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                    ) {
-                                        Icon(Icons.Filled.Receipt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Cargar Factura", fontSize = 13.sp)
-                                    }
-                                }
+                                )
 
                                 if (supplier.phone.isNotBlank() || supplier.address.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -235,42 +240,46 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                                                     modifier = Modifier.fillMaxWidth()
                                                 ) {
                                                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                                            verticalAlignment = Alignment.CenterVertically
-                                                        ) {
-                                                            Text(
-                                                                "Factura #${invoice.invoiceNumber}",
-                                                                fontWeight = FontWeight.Bold,
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                color = MaterialTheme.colorScheme.primary
-                                                            )
-                                                            Text(
-                                                                "\$${String.format("%.2f", invoice.totalAmount)} USD",
-                                                                fontWeight = FontWeight.Bold,
-                                                                style = MaterialTheme.typography.bodyMedium
-                                                            )
-                                                        }
-
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.SpaceBetween
-                                                        ) {
-                                                            Text(
-                                                                dateFormat.format(Date(invoice.timestamp)),
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                            if (invoice.description.isNotBlank()) {
+                                                        ResponsiveActionRow(
+                                                            breakpoint = 280.dp,
+                                                            content = {
                                                                 Text(
-                                                                    invoice.description,
-                                                                    style = MaterialTheme.typography.labelSmall,
-                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                    maxLines = 1
+                                                                    "Factura #${invoice.invoiceNumber}",
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    style = MaterialTheme.typography.bodyMedium,
+                                                                    color = MaterialTheme.colorScheme.primary
+                                                                )
+                                                            },
+                                                            action = {
+                                                                Text(
+                                                                    "\$${String.format("%.2f", invoice.totalAmount)} USD",
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    style = MaterialTheme.typography.bodyMedium
                                                                 )
                                                             }
-                                                        }
+                                                        )
+
+                                                        ResponsiveActionRow(
+                                                            breakpoint = 280.dp,
+                                                            stackedActionAlignment = Alignment.Start,
+                                                            content = {
+                                                                Text(
+                                                                    dateFormat.format(Date(invoice.timestamp)),
+                                                                    style = MaterialTheme.typography.labelSmall,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                            },
+                                                            action = {
+                                                                if (invoice.description.isNotBlank()) {
+                                                                    Text(
+                                                                        invoice.description,
+                                                                        style = MaterialTheme.typography.labelSmall,
+                                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                        maxLines = 1
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
 
                                                         // Linked Products in Inventory
                                                         if (linkedProducts.isNotEmpty()) {
@@ -305,7 +314,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
         var phone by remember { mutableStateOf("") }
         var address by remember { mutableStateOf("") }
 
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { showAddDialog = false },
             title = {
                 Row(
@@ -326,7 +335,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                         onValueChange = { name = it },
                         label = { Text("Nombre / Razón Social *") },
                         leadingIcon = { Icon(Icons.Filled.Business, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                     OutlinedTextField(
@@ -335,7 +344,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                         label = { Text("RIF / CI *") },
                         placeholder = { Text("Ej: J-12345678-9") },
                         leadingIcon = { Icon(Icons.Filled.Badge, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                     OutlinedTextField(
@@ -344,7 +353,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                         label = { Text("Teléfono") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         leadingIcon = { Icon(Icons.Filled.Phone, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                     OutlinedTextField(
@@ -352,7 +361,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                         onValueChange = { address = it },
                         label = { Text("Dirección (Opcional)") },
                         leadingIcon = { Icon(Icons.Filled.Home, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                 }
@@ -408,7 +417,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
             voucherNumberInput = "$dateStr$randomNum"
         }
 
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { showInvoiceDialog = false },
             title = {
                 Row(
@@ -434,9 +443,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
             },
             text = {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedTextField(
@@ -445,7 +452,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                         label = { Text("Número de Factura / Control *") },
                         placeholder = { Text("Ej: FAC-10045") },
                         leadingIcon = { Icon(Icons.Filled.Receipt, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp)
                     )
@@ -469,7 +476,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                                 )
                             }
                         },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         singleLine = true,
                         shape = RoundedCornerShape(10.dp)
                     )
@@ -499,26 +506,31 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Retenciones a Practicar al Proveedor", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                                    Text("Retención de IVA e ISLR según normativa SENIAT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            ResponsiveActionRow(
+                                breakpoint = 280.dp,
+                                content = {
+                                    Column {
+                                        Text("Retenciones a Practicar al Proveedor", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                                        Text("Retención de IVA e ISLR según normativa SENIAT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                },
+                                action = {
+                                    Switch(
+                                        checked = applyRetentions,
+                                        onCheckedChange = { applyRetentions = it }
+                                    )
                                 }
-                                Switch(
-                                    checked = applyRetentions,
-                                    onCheckedChange = { applyRetentions = it }
-                                )
-                            }
+                            )
 
                             if (applyRetentions) {
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
 
                                 Text("% Retención IVA:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
                                     FilterChip(
                                         selected = ivaRetentionPercentage == "75",
                                         onClick = { ivaRetentionPercentage = "75" },
@@ -532,7 +544,11 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                                 }
 
                                 Text("% Retención ISLR:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
                                     listOf("0.0", "1.0", "2.0", "3.0", "5.0").forEach { perc ->
                                         FilterChip(
                                             selected = islrRetentionPercentage == perc,
@@ -550,7 +566,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                                     leadingIcon = { Icon(Icons.Filled.ConfirmationNumber, contentDescription = null) },
                                     singleLine = true,
                                     shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
                                 )
 
                                 Surface(
@@ -583,7 +599,7 @@ fun SuppliersScreen(viewModel: PosViewModel) {
                         onValueChange = { desc = it },
                         label = { Text("Descripción / Concepto (Opcional)") },
                         leadingIcon = { Icon(Icons.Filled.Description, contentDescription = null) },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                 }

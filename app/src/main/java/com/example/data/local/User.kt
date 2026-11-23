@@ -12,5 +12,6 @@ data class User(
     val pin: String,
     val role: String, // "ADMIN", "SUPERVISOR", "CASHIER"
     val avatarUrl: String = "",
-    val canEarnCommission: Boolean = true
+    val canEarnCommission: Boolean = true,
+    val allowedModules: String = ""
 )

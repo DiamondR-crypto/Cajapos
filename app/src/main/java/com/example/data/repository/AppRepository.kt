@@ -1,12 +1,14 @@
 package com.example.data.repository
 
 import com.example.data.local.AppDatabase
+import com.example.data.local.CasheaSettlement
 import com.example.data.local.Customer
 import com.example.data.local.DeliveryNote
 import com.example.data.local.DeliveryNoteItem
 import com.example.data.local.Expense
 import com.example.data.local.HeldSale
 import com.example.data.local.HeldSaleItem
+import com.example.data.local.PosTerminalRecord
 import com.example.data.local.PreferencesManager
 import com.example.data.local.Product
 import com.example.data.local.Quote
@@ -35,6 +37,7 @@ class AppRepository(
     // Suppliers
     val allSuppliers: Flow<List<Supplier>> = database.supplierDao().getAllSuppliers()
     suspend fun insertSupplier(supplier: Supplier) = database.supplierDao().insertSupplier(supplier)
+    suspend fun insertSupplierAndGetId(supplier: Supplier): Long = database.supplierDao().insertSupplierAndGetId(supplier)
 
     // Purchase Invoices
     val allPurchaseInvoices: Flow<List<PurchaseInvoice>> = database.purchaseInvoiceDao().getAllInvoices()
@@ -213,6 +216,19 @@ class AppRepository(
     suspend fun insertExpense(expense: Expense) = database.expenseDao().insertExpense(expense)
     suspend fun deleteExpense(expense: Expense) = database.expenseDao().deleteExpense(expense)
     suspend fun deleteExpenseById(id: Int) = database.expenseDao().deleteExpenseById(id)
+
+    // Cashea Settlements (Liquidaciones y Comisiones de Cashea)
+    val allCasheaSettlements: Flow<List<CasheaSettlement>> = database.casheaSettlementDao().getAllSettlements()
+    suspend fun insertCasheaSettlement(settlement: CasheaSettlement) = database.casheaSettlementDao().insertSettlement(settlement)
+    suspend fun deleteCasheaSettlement(settlement: CasheaSettlement) = database.casheaSettlementDao().deleteSettlement(settlement)
+    suspend fun deleteCasheaSettlementById(id: Int) = database.casheaSettlementDao().deleteSettlementById(id)
+
+    // POS Terminal Voucher Records (Registros de Puntos de Venta)
+    val allPosTerminalRecords: Flow<List<PosTerminalRecord>> = database.posTerminalRecordDao().getAllRecords()
+    suspend fun insertPosTerminalRecord(record: PosTerminalRecord): Long = database.posTerminalRecordDao().insertRecord(record)
+    suspend fun updatePosTerminalRecord(record: PosTerminalRecord) = database.posTerminalRecordDao().updateRecord(record)
+    suspend fun deletePosTerminalRecord(record: PosTerminalRecord) = database.posTerminalRecordDao().deleteRecord(record)
+    suspend fun deletePosTerminalRecordById(id: Int) = database.posTerminalRecordDao().deleteRecordById(id)
 
     // Rate
     fun updateRate(newRate: Double) {

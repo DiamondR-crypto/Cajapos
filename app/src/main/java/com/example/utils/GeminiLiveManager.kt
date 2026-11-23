@@ -7,6 +7,7 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.LoudnessEnhancer
 import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +72,7 @@ class GeminiLiveManager(
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
     private var echoCanceler: AcousticEchoCanceler? = null
+    private var loudnessEnhancer: LoudnessEnhancer? = null
     private var recordJob: Job? = null
 
     @Volatile
@@ -494,7 +496,7 @@ class GeminiLiveManager(
             val track = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
@@ -509,6 +511,15 @@ class GeminiLiveManager(
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
 
+            track.setVolume(AudioTrack.getMaxVolume())
+            try {
+                val enhancer = LoudnessEnhancer(track.audioSessionId)
+                enhancer.setTargetGain(1200) // +12 dB hardware loudness boost for clear speaker output
+                enhancer.enabled = true
+                loudnessEnhancer = enhancer
+            } catch (e: Exception) {
+                Log.w(TAG, "LoudnessEnhancer unavailable: ${e.message}")
+            }
             track.play()
             audioTrack = track
         } catch (e: Exception) {
@@ -521,14 +532,31 @@ class GeminiLiveManager(
         try {
             val pcmBytes = Base64.decode(base64Data, Base64.DEFAULT)
             if (pcmBytes.isNotEmpty()) {
+                val boostedBytes = amplifyPcm16(pcmBytes, gain = 2.2f)
                 if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
                     track.play()
                 }
-                track.write(pcmBytes, 0, pcmBytes.size)
+                track.write(boostedBytes, 0, boostedBytes.size)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error playing audio chunk", e)
         }
+    }
+
+    private fun amplifyPcm16(pcmBytes: ByteArray, gain: Float): ByteArray {
+        val out = pcmBytes.copyOf()
+        var i = 0
+        while (i + 1 < out.size) {
+            val low = out[i].toInt() and 0xFF
+            val high = out[i + 1].toInt() shl 8
+            val sample = (high or low).toShort().toInt()
+            val amplified = (sample * gain).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+            out[i] = (amplified and 0xFF).toByte()
+            out[i + 1] = ((amplified shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        return out
     }
 
     private fun flushAudioPlayback() {
@@ -548,6 +576,13 @@ class GeminiLiveManager(
         } catch (_: Exception) {
         } finally {
             echoCanceler = null
+        }
+
+        try {
+            loudnessEnhancer?.release()
+        } catch (_: Exception) {
+        } finally {
+            loudnessEnhancer = null
         }
 
         try {

@@ -21,8 +21,15 @@ data class Content(
 )
 
 @JsonClass(generateAdapter = true)
+data class InlineData(
+    val mimeType: String,
+    val data: String
+)
+
+@JsonClass(generateAdapter = true)
 data class Part(
     val text: String? = null,
+    val inlineData: InlineData? = null,
     val functionCall: FunctionCall? = null,
     val functionResponse: FunctionResponse? = null
 )
@@ -80,7 +87,7 @@ data class Candidate(
 interface GeminiApiService {
     @POST("v1beta/models/{model}:generateContent")
     suspend fun generateContent(
-        @Path("model") model: String = "gemini-2.5-flash",
+        @Path("model") model: String = "gemini-3.5-flash-lite",
         @Query("key") apiKey: String,
         @Body request: GenerateContentRequest
     ): GenerateContentResponse

@@ -329,6 +329,25 @@ function makeDevice(uid, ts = pastDate()) {
   };
 }
 
+function makeEncryptedBackup(uid, ts = pastDate()) {
+  return {
+    userId: uid,
+    googleEmail: "tienda@gmail.com",
+    storeName: "Comercial Central C.A.",
+    storeRif: "J-12345678-9",
+    deviceId: "device_1",
+    deviceModel: "Samsung Galaxy Tab",
+    formatVersion: 2,
+    productsCount: 25,
+    salesCount: 10,
+    customersCount: 8,
+    exportedAtMs: Date.now() - 1000,
+    encryptedPayload: "Q0FKQVBPU19FTkNfR1pJUF9WMg==",
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
 // --- TESTS ---
 
 test("Unauthenticated users: denied on root, users/{uid}, and all subcollections", async () => {
@@ -595,6 +614,65 @@ test("Validation & security rejections: extra id key, future timestamp, negative
     userRef.collection("products").doc("prod_ok").update({
       isAdmin: true,
       updatedAt: pastDate(100),
+    })
+  );
+});
+
+test("Encrypted JSON backups: owner creates, updates in-place (modifying previous doc), and cross-user/invalid payloads fail", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+
+  const aliceBackupRef = aliceDb.collection("users").doc(ALICE_UID).collection("encrypted_backups").doc("latest");
+
+  // Unauthenticated denied
+  await assertFails(
+    unauthDb.collection("users").doc(ALICE_UID).collection("encrypted_backups").doc("latest").get()
+  );
+
+  // Owner create succeeds
+  await assertSucceeds(aliceBackupRef.set(makeEncryptedBackup(ALICE_UID)));
+
+  // Owner read & list succeeds
+  await assertSucceeds(aliceBackupRef.get());
+  await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("encrypted_backups").get());
+
+  // Owner updates in-place (every 20 min overwrite modifying the previous doc)
+  await assertSucceeds(
+    aliceBackupRef.update({
+      deviceId: "device_2",
+      deviceModel: "Xiaomi Pad 6",
+      productsCount: 30,
+      salesCount: 14,
+      customersCount: 9,
+      exportedAtMs: Date.now(),
+      encryptedPayload: "VVBEQVRFRF9FTkNSWVBURURfUEFZTE9BRA==",
+      updatedAt: pastDate(100),
+    })
+  );
+
+  // Cross-user Bob cannot read, overwrite, or delete Alice's encrypted backup
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("encrypted_backups").doc("latest").get()
+  );
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("encrypted_backups").doc("latest").update({
+      encryptedPayload: "SElKQUNLRUQ=",
+      updatedAt: pastDate(50),
+    })
+  );
+
+  // Empty encryptedPayload or immutable createdAt change must fail
+  await assertFails(
+    aliceBackupRef.update({
+      encryptedPayload: "",
+      updatedAt: pastDate(50),
+    })
+  );
+  await assertFails(
+    aliceBackupRef.update({
+      createdAt: pastDate(50),
+      updatedAt: pastDate(50),
     })
   );
 });

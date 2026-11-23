@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -26,6 +27,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.Quote
 import com.example.data.local.QuoteItem
 import com.example.ui.PosViewModel
+import com.example.utils.PdfExportManager
+import java.util.Locale
 
 @Composable
 fun QuoteTicketDialog(
@@ -64,15 +67,20 @@ fun QuoteTicketDialog(
     var isPrinting by remember { mutableStateOf(false) }
     var printStatusText by remember { mutableStateOf<String?>(null) }
     var showScanDialog by remember { mutableStateOf(false) }
+    var showPdfExportDialog by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .systemBarsPadding()
+                .padding(14.dp),
             contentAlignment = Alignment.Center
         ) {
             Surface(
@@ -227,69 +235,137 @@ fun QuoteTicketDialog(
                         }
 
                         // Secondary actions: PDF, Image, WhatsApp
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    val file = ReceiptPrinter(context, viewModel.prefs).generateQuotePdf(quote, items)
-                                    if (file != null) {
-                                        TicketUtils.shareFile(context, file, "application/pdf")
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val wideActions = maxWidth >= 340.dp
+                            if (wideActions) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { showPdfExportDialog = true },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("quote_pdf_button"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("PDF", fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("quote_pdf_button"),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("PDF", fontSize = 13.sp)
-                            }
 
-                            OutlinedButton(
-                                onClick = {
-                                    val squareBitmap = TicketUtils.generateWhatsAppSquareQuoteBitmap(context, viewModel.prefs, quote, items)
-                                    val file = TicketUtils.saveQuoteBitmapToFile(context, squareBitmap, quote.id)
-                                    if (file != null) {
-                                        TicketUtils.shareFile(context, file, "image/png")
+                                    OutlinedButton(
+                                        onClick = {
+                                            val squareBitmap = TicketUtils.generateWhatsAppSquareQuoteBitmap(context, viewModel.prefs, quote, items)
+                                            val file = TicketUtils.saveQuoteBitmapToFile(context, squareBitmap, quote.id)
+                                            if (file != null) {
+                                                TicketUtils.shareFile(context, file, "image/png")
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("quote_image_button"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Imagen", fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("quote_image_button"),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Imagen", fontSize = 13.sp)
-                            }
 
-                            Button(
-                                onClick = {
-                                    val squareBitmap = TicketUtils.generateWhatsAppSquareQuoteBitmap(context, viewModel.prefs, quote, items)
-                                    val file = TicketUtils.saveQuoteBitmapToFile(context, squareBitmap, quote.id)
-                                    if (file != null) {
-                                        val caption = "Presupuesto ${quote.quoteNumber.ifBlank { "#${quote.id}" }} - ${viewModel.prefs.storeName} • " +
-                                            "Total: \$${String.format("%.2f", quote.totalUsd)} USD (Bs. ${String.format("%.2f", quote.totalBs)}) • " +
-                                            "Válido por ${quote.validityDays} días."
-                                        TicketUtils.shareWhatsAppFile(
-                                            context = context,
-                                            file = file,
-                                            phone = customerPhone,
-                                            captionText = caption
-                                        )
+                                    Button(
+                                        onClick = {
+                                            val squareBitmap = TicketUtils.generateWhatsAppSquareQuoteBitmap(context, viewModel.prefs, quote, items)
+                                            val file = TicketUtils.saveQuoteBitmapToFile(context, squareBitmap, quote.id)
+                                            if (file != null) {
+                                                val caption = "Presupuesto ${quote.quoteNumber.ifBlank { "#${quote.id}" }} - ${viewModel.prefs.storeName} • " +
+                                                    "Total: \$${String.format("%.2f", quote.totalUsd)} USD (Bs. ${String.format("%.2f", quote.totalBs)}) • " +
+                                                    "Válido por ${quote.validityDays} días."
+                                                TicketUtils.shareWhatsAppFile(
+                                                    context = context,
+                                                    file = file,
+                                                    phone = customerPhone,
+                                                    captionText = caption
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1.2f)
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("quote_whatsapp_button"),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("WhatsApp", fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
-                                },
-                                modifier = Modifier
-                                    .weight(1.2f)
-                                    .testTag("quote_whatsapp_button"),
-                                shape = RoundedCornerShape(10.dp)
-                            ) {
-                                Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("WhatsApp", fontSize = 13.sp)
+                                }
+                            } else {
+                                ResponsiveFlowGroup(
+                                    horizontalSpacing = 8.dp,
+                                    verticalSpacing = 8.dp,
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { showPdfExportDialog = true },
+                                        modifier = Modifier
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("quote_pdf_button"),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("PDF", fontSize = 12.5.sp)
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            val squareBitmap = TicketUtils.generateWhatsAppSquareQuoteBitmap(context, viewModel.prefs, quote, items)
+                                            val file = TicketUtils.saveQuoteBitmapToFile(context, squareBitmap, quote.id)
+                                            if (file != null) {
+                                                TicketUtils.shareFile(context, file, "image/png")
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("quote_image_button"),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Imagen", fontSize = 12.5.sp)
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            val squareBitmap = TicketUtils.generateWhatsAppSquareQuoteBitmap(context, viewModel.prefs, quote, items)
+                                            val file = TicketUtils.saveQuoteBitmapToFile(context, squareBitmap, quote.id)
+                                            if (file != null) {
+                                                val caption = "Presupuesto ${quote.quoteNumber.ifBlank { "#${quote.id}" }} - ${viewModel.prefs.storeName} • " +
+                                                    "Total: \$${String.format("%.2f", quote.totalUsd)} USD (Bs. ${String.format("%.2f", quote.totalBs)}) • " +
+                                                    "Válido por ${quote.validityDays} días."
+                                                TicketUtils.shareWhatsAppFile(
+                                                    context = context,
+                                                    file = file,
+                                                    phone = customerPhone,
+                                                    captionText = caption
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .minimumInteractiveComponentSize()
+                                            .testTag("quote_whatsapp_button"),
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("WhatsApp", fontSize = 12.5.sp)
+                                    }
+                                }
                             }
                         }
                     }
@@ -302,6 +378,24 @@ fun QuoteTicketDialog(
         PrinterScanDialog(
             viewModel = viewModel,
             onDismiss = { showScanDialog = false }
+        )
+    }
+
+    if (showPdfExportDialog) {
+        val qCode = quote.quoteNumber.ifBlank { "PRE-${quote.id}" }
+        PdfExportActionDialog(
+            title = "Presupuesto $qCode en PDF",
+            subtitle = "Cliente: ${quote.customerName} • Total: \$${String.format(Locale.US, "%.2f", quote.totalUsd)} USD",
+            suggestedFileName = "Presupuesto_${qCode.replace(Regex("[^A-Za-z0-9_-]"), "_")}.pdf",
+            generatePdf = {
+                PdfExportManager.generateQuotePdf(
+                    context = context,
+                    prefs = viewModel.prefs,
+                    quote = quote,
+                    items = items
+                )
+            },
+            onDismiss = { showPdfExportDialog = false }
         )
     }
 }

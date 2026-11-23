@@ -1,11 +1,16 @@
 package com.example.data.repository
 
 import android.content.Context
+import android.os.Build
+import android.util.Base64
 import android.util.Log
 import com.example.R
 import com.example.data.local.*
 import com.example.data.remote.*
+import com.example.utils.ImportBackupResult
+import com.example.utils.SecureEncryptedBackupManager
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -22,17 +27,24 @@ class FirestoreSyncRepository(
     private val context: Context,
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
+    companion object {
+        const val ENCRYPTED_BACKUP_INTERVAL_MS = 20L * 60L * 1000L // 20 minutos
+        private const val ENCRYPTED_BACKUP_DOC_ID = "latest"
+        private const val MAX_FIRESTORE_PAYLOAD_CHARS = 950_000
+    }
+
     private val TAG = "FirestoreSync"
     private val databaseId: String = try {
         context.getString(R.string.firestore_database_id)
     } catch (_: Exception) {
-        "ai-studio-android-cajapos-eb114155-a570-45fb-9f2f-7385db700fe0"
+        "ai-studio-android-cajapos-9575fbef-8e43-46f9-8f4a-798a9b59d5bf"
     }
 
     val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(databaseId)
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var syncJob: Job? = null
+    private var periodicBackupJob: Job? = null
     private val listenerRegistrations = mutableListOf<ListenerRegistration>()
 
     private val _isSyncing = MutableStateFlow(false)
@@ -43,6 +55,21 @@ class FirestoreSyncRepository(
 
     private val _companyProfile = MutableStateFlow<FsCompanyProfile?>(null)
     val companyProfile: StateFlow<FsCompanyProfile?> = _companyProfile.asStateFlow()
+
+    private val _lastEncryptedBackupTimestamp = MutableStateFlow(localRepository.prefs.lastFirebaseEncryptedBackupTimestamp)
+    val lastEncryptedBackupTimestamp: StateFlow<Long> = _lastEncryptedBackupTimestamp.asStateFlow()
+
+    private val _lastEncryptedBackupSummary = MutableStateFlow(localRepository.prefs.lastFirebaseEncryptedBackupSummary)
+    val lastEncryptedBackupSummary: StateFlow<String> = _lastEncryptedBackupSummary.asStateFlow()
+
+    private val _remoteEncryptedBackupInfo = MutableStateFlow<FsEncryptedBackup?>(null)
+    val remoteEncryptedBackupInfo: StateFlow<FsEncryptedBackup?> = _remoteEncryptedBackupInfo.asStateFlow()
+
+    private val _isUploadingEncryptedBackup = MutableStateFlow(false)
+    val isUploadingEncryptedBackup: StateFlow<Boolean> = _isUploadingEncryptedBackup.asStateFlow()
+
+    private val _isRestoringEncryptedBackup = MutableStateFlow(false)
+    val isRestoringEncryptedBackup: StateFlow<Boolean> = _isRestoringEncryptedBackup.asStateFlow()
 
     val currentUserEmail: String?
         get() = auth.currentUser?.email
@@ -82,6 +109,29 @@ class FirestoreSyncRepository(
                 _isSyncing.value = false
             }
         }
+
+        // Loop automático cada 20 minutos para actualizar el respaldo JSON encriptado en Firebase
+        periodicBackupJob = scope.launch {
+            delay(15_000L) // Espera breve tras iniciar sesión para no interferir con la sincronización inicial
+            while (isActive) {
+                try {
+                    val lastTs = localRepository.prefs.lastFirebaseEncryptedBackupTimestamp
+                    val elapsed = System.currentTimeMillis() - lastTs
+                    if (lastTs <= 0L || elapsed >= ENCRYPTED_BACKUP_INTERVAL_MS) {
+                        uploadEncryptedJsonBackup(skipIfLocalEmptyAndRemoteExists = true)
+                    } else {
+                        val remaining = (ENCRYPTED_BACKUP_INTERVAL_MS - elapsed).coerceAtLeast(1000L)
+                        delay(remaining)
+                        uploadEncryptedJsonBackup(skipIfLocalEmptyAndRemoteExists = true)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Periodic 20-min encrypted backup notice: ${e.message}")
+                }
+                delay(ENCRYPTED_BACKUP_INTERVAL_MS)
+            }
+        }
     }
 
     fun stopSync() {
@@ -93,6 +143,8 @@ class FirestoreSyncRepository(
         }
         syncJob?.cancel()
         syncJob = null
+        periodicBackupJob?.cancel()
+        periodicBackupJob = null
         _isSyncing.value = false
     }
 
@@ -245,7 +297,9 @@ class FirestoreSyncRepository(
                                     aisleNumber = fsProd.aisleNumber,
                                     aisleQuantity = fsProd.aisleQuantity,
                                     depotQuantity = fsProd.depotQuantity,
-                                    counterQuantity = fsProd.counterQuantity
+                                    counterQuantity = fsProd.counterQuantity,
+                                    minStockAlertQuantity = fsProd.minStockAlertQuantity,
+                                    isLowStockAlertEnabled = fsProd.lowStockAlertEnabled
                                 )
                                 localRepository.insertProduct(newProd)
                             } else {
@@ -269,7 +323,9 @@ class FirestoreSyncRepository(
                                     aisleNumber = fsProd.aisleNumber,
                                     aisleQuantity = fsProd.aisleQuantity,
                                     depotQuantity = fsProd.depotQuantity,
-                                    counterQuantity = fsProd.counterQuantity
+                                    counterQuantity = fsProd.counterQuantity,
+                                    minStockAlertQuantity = fsProd.minStockAlertQuantity,
+                                    isLowStockAlertEnabled = fsProd.lowStockAlertEnabled
                                 )
                                 localRepository.updateProduct(updated)
                             }
@@ -334,10 +390,34 @@ class FirestoreSyncRepository(
             }
         }
 
+        // Encrypted backup metadata real-time listener (keeps multi-device status updated)
+        val encryptedBackupListener = userRef.collection("encrypted_backups").document(ENCRYPTED_BACKUP_DOC_ID)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) return@addSnapshotListener
+                if (snapshot != null && snapshot.exists()) {
+                    val remote = snapshot.toObject(
+                        FsEncryptedBackup::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                    if (remote != null) {
+                        _remoteEncryptedBackupInfo.value = remote
+                        val effectiveTs = remote.updatedAt?.toDate()?.time ?: remote.exportedAtMs
+                        if (effectiveTs > _lastEncryptedBackupTimestamp.value) {
+                            _lastEncryptedBackupTimestamp.value = effectiveTs
+                            localRepository.prefs.lastFirebaseEncryptedBackupTimestamp = effectiveTs
+                        }
+                        val summary = "${remote.productsCount} prod. • ${remote.salesCount} ventas • ${remote.deviceModel.ifBlank { "Dispositivo" }}"
+                        _lastEncryptedBackupSummary.value = summary
+                        localRepository.prefs.lastFirebaseEncryptedBackupSummary = summary
+                    }
+                }
+            }
+
         synchronized(listenerRegistrations) {
             listenerRegistrations.add(profileListener)
             listenerRegistrations.add(productsListener)
             listenerRegistrations.add(salesListener)
+            listenerRegistrations.add(encryptedBackupListener)
         }
     }
 
@@ -434,7 +514,9 @@ class FirestoreSyncRepository(
                 aisleNumber = product.aisleNumber,
                 aisleQuantity = product.aisleQuantity,
                 depotQuantity = product.depotQuantity,
-                counterQuantity = product.counterQuantity
+                counterQuantity = product.counterQuantity,
+                minStockAlertQuantity = product.minStockAlertQuantity,
+                lowStockAlertEnabled = product.isLowStockAlertEnabled
             )
             ref.set(fsProd.toCreateMap(uid)).await()
             Result.success(Unit)
@@ -521,6 +603,206 @@ class FirestoreSyncRepository(
             if (e is CancellationException) throw e
             val err = FirestoreErrorHandler.handleFirestoreError(e, OperationType.WRITE, "sales/$saleCloudId")
             Result.failure(Exception(err))
+        }
+    }
+
+    /**
+     * Generates an AES-256-GCM encrypted JSON backup of the local Room database and
+     * overwrites/modifies the single cloud record `users/{uid}/encrypted_backups/latest`
+     * so multiple devices on the same Google account share a constant up-to-date snapshot.
+     */
+    suspend fun uploadEncryptedJsonBackup(skipIfLocalEmptyAndRemoteExists: Boolean = false): Result<String> {
+        val uid = currentUserId ?: return Result.failure(Exception("Debes iniciar sesión con Google para respaldar en Firebase."))
+        val prefs = localRepository.prefs
+        _isUploadingEncryptedBackup.value = true
+        return try {
+            val userRef = firestore.collection("users").document(uid)
+            val userDoc = userRef.get().await()
+            if (!userDoc.exists()) {
+                val acc = FsUserAccount(
+                    userId = uid,
+                    email = auth.currentUser?.email ?: "",
+                    displayName = auth.currentUser?.displayName ?: "Administrador"
+                )
+                userRef.set(acc.toCreateMap(uid)).await()
+            }
+
+            val db = AppDatabase.getDatabase(context)
+            val backupManager = SecureEncryptedBackupManager(context, db)
+            val payload = backupManager.exportEncryptedBytes(
+                storeName = prefs.storeName,
+                storeRif = prefs.storeRif,
+                prefs = prefs,
+                compressGzip = true
+            ).getOrElse { err ->
+                return Result.failure(err)
+            }
+
+            val backupRef = userRef.collection("encrypted_backups").document(ENCRYPTED_BACKUP_DOC_ID)
+            val existingSnap = backupRef.get().await()
+
+            val isLocalEmpty = payload.productsCount == 0 &&
+                payload.salesCount == 0 &&
+                payload.customersCount == 0 &&
+                !prefs.isCompanyRegistered
+
+            if (skipIfLocalEmptyAndRemoteExists && isLocalEmpty && existingSnap.exists()) {
+                Log.i(TAG, "Skipping auto encrypted backup: local DB is empty and cloud backup already exists.")
+                return Result.success("Respaldo remoto preservado (dispositivo local sin datos aún).")
+            }
+
+            val encodedPayload = Base64.encodeToString(payload.encryptedBytes, Base64.NO_WRAP)
+            if (encodedPayload.length > MAX_FIRESTORE_PAYLOAD_CHARS) {
+                return Result.failure(
+                    Exception("El respaldo encriptado (${encodedPayload.length} bytes) excede el límite de 1 MB de Firestore.")
+                )
+            }
+
+            val deviceModel = "${Build.MANUFACTURER.replaceFirstChar { it.uppercase() }} ${Build.MODEL}".take(120)
+            val email = (auth.currentUser?.email ?: prefs.googleAccount).take(200)
+            val fsBackup = FsEncryptedBackup(
+                userId = uid,
+                googleEmail = email,
+                storeName = prefs.storeName.take(120),
+                storeRif = prefs.storeRif.take(40),
+                deviceId = prefs.deviceUniqueId.take(128),
+                deviceModel = deviceModel,
+                formatVersion = payload.formatVersion,
+                productsCount = payload.productsCount,
+                salesCount = payload.salesCount,
+                customersCount = payload.customersCount,
+                exportedAtMs = payload.exportedAt,
+                encryptedPayload = encodedPayload
+            )
+
+            if (!existingSnap.exists()) {
+                backupRef.set(fsBackup.toCreateMap(uid)).await()
+            } else {
+                backupRef.update(fsBackup.toUpdateMap()).await()
+            }
+
+            // Register or update device heartbeat
+            val safeDeviceId = prefs.deviceUniqueId.replace(Regex("[^a-zA-Z0-9_\\-]"), "_").take(128)
+            if (safeDeviceId.isNotBlank()) {
+                try {
+                    val deviceRef = userRef.collection("devices").document(safeDeviceId)
+                    val devSnap = deviceRef.get().await()
+                    if (!devSnap.exists()) {
+                        val fsDev = FsDevice(userId = uid, deviceModel = deviceModel, googleEmail = email)
+                        deviceRef.set(fsDev.toCreateMap(uid)).await()
+                    } else {
+                        deviceRef.update(
+                            mapOf(
+                                "deviceModel" to deviceModel,
+                                "googleEmail" to email,
+                                "lastActiveAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        ).await()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Device heartbeat update skipped: ${e.message}")
+                }
+            }
+
+            val summary = "${payload.productsCount} prod. • ${payload.salesCount} ventas • $deviceModel"
+            prefs.lastFirebaseEncryptedBackupTimestamp = payload.exportedAt
+            prefs.lastFirebaseEncryptedBackupSummary = summary
+            _lastEncryptedBackupTimestamp.value = payload.exportedAt
+            _lastEncryptedBackupSummary.value = summary
+            _remoteEncryptedBackupInfo.value = fsBackup
+
+            Log.i(TAG, "Encrypted JSON backup updated in Firestore ($summary)")
+            Result.success("Respaldo JSON encriptado guardado en Firebase ($summary).")
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            val err = FirestoreErrorHandler.handleFirestoreError(
+                e,
+                OperationType.WRITE,
+                "users/$uid/encrypted_backups/$ENCRYPTED_BACKUP_DOC_ID"
+            )
+            _lastError.value = err
+            Result.failure(Exception(err))
+        } finally {
+            _isUploadingEncryptedBackup.value = false
+        }
+    }
+
+    /**
+     * Downloads the latest AES-256-GCM encrypted JSON backup from Firestore for the signed-in
+     * Google account, decrypts and verifies its integrity, restores it into Room, and keeps sync active.
+     */
+    suspend fun restoreEncryptedJsonBackupAndSync(appendMode: Boolean = false): Result<ImportBackupResult> {
+        val uid = currentUserId ?: return Result.failure(Exception("Debes iniciar sesión con Google para recuperar el respaldo."))
+        _isRestoringEncryptedBackup.value = true
+        return try {
+            val backupRef = firestore.collection("users")
+                .document(uid)
+                .collection("encrypted_backups")
+                .document(ENCRYPTED_BACKUP_DOC_ID)
+
+            val snap = backupRef.get().await()
+            if (!snap.exists()) {
+                return Result.failure(Exception("No se encontró ningún respaldo JSON encriptado en la cuenta de Google."))
+            }
+
+            val fsBackup = snap.toObject(
+                FsEncryptedBackup::class.java,
+                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+            ) ?: return Result.failure(Exception("No se pudo leer el respaldo encriptado de Firebase."))
+
+            if (fsBackup.encryptedPayload.isBlank()) {
+                return Result.failure(Exception("El respaldo en Firebase está vacío."))
+            }
+
+            val encryptedBytes = Base64.decode(fsBackup.encryptedPayload, Base64.NO_WRAP)
+            val db = AppDatabase.getDatabase(context)
+            val backupManager = SecureEncryptedBackupManager(context, db)
+            val importResult = backupManager.importAndProcessEncryptedBytes(
+                fileBytes = encryptedBytes,
+                appendMode = appendMode,
+                cloudSyncRestore = true,
+                prefs = localRepository.prefs
+            )
+
+            if (!importResult.success) {
+                return Result.failure(Exception(importResult.message))
+            }
+
+            val effectiveTs = fsBackup.updatedAt?.toDate()?.time ?: fsBackup.exportedAtMs
+            val summary = "${fsBackup.productsCount} prod. • ${fsBackup.salesCount} ventas • ${fsBackup.deviceModel.ifBlank { "Nube Google" }}"
+            localRepository.prefs.lastFirebaseEncryptedBackupTimestamp = effectiveTs
+            localRepository.prefs.lastFirebaseEncryptedBackupSummary = summary
+            _lastEncryptedBackupTimestamp.value = effectiveTs
+            _lastEncryptedBackupSummary.value = summary
+            _remoteEncryptedBackupInfo.value = fsBackup
+
+            // Ensure company profile and real-time sync stay aligned across devices
+            val prefs = localRepository.prefs
+            if (prefs.isCompanyRegistered && !isDefaultPlaceholderCompany(prefs.storeName, prefs.storeRif)) {
+                syncCompanyProfile(
+                    storeName = prefs.storeName,
+                    storeRif = prefs.storeRif,
+                    storePhone = prefs.storePhone,
+                    storeAddress = prefs.storeAddress
+                )
+            }
+            if (syncJob == null || listenerRegistrations.isEmpty()) {
+                startSync()
+            }
+
+            Result.success(importResult)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            val err = FirestoreErrorHandler.handleFirestoreError(
+                e,
+                OperationType.GET,
+                "users/$uid/encrypted_backups/$ENCRYPTED_BACKUP_DOC_ID"
+            )
+            _lastError.value = err
+            Result.failure(Exception(err))
+        } finally {
+            _isRestoringEncryptedBackup.value = false
         }
     }
 }

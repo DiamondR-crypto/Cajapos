@@ -89,6 +89,8 @@ data class FsProduct(
     val aisleQuantity: Double = 0.0,
     val depotQuantity: Double = 0.0,
     val counterQuantity: Double = 0.0,
+    val minStockAlertQuantity: Double = 5.0,
+    val lowStockAlertEnabled: Boolean = true,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -115,6 +117,8 @@ data class FsProduct(
         "aisleQuantity" to aisleQuantity,
         "depotQuantity" to depotQuantity,
         "counterQuantity" to counterQuantity,
+        "minStockAlertQuantity" to minStockAlertQuantity,
+        "lowStockAlertEnabled" to lowStockAlertEnabled,
         "createdAt" to FieldValue.serverTimestamp(),
         "updatedAt" to FieldValue.serverTimestamp()
     )
@@ -352,6 +356,7 @@ data class FsDeliveryNote(
     val status: String = "ENTREGADO",
     val cashierName: String = "",
     val cashRegisterNumber: String = "",
+    val displayCurrency: String = "USD",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -369,6 +374,7 @@ data class FsDeliveryNote(
         "status" to status,
         "cashierName" to cashierName,
         "cashRegisterNumber" to cashRegisterNumber,
+        "displayCurrency" to displayCurrency,
         "createdAt" to FieldValue.serverTimestamp(),
         "updatedAt" to FieldValue.serverTimestamp()
     )
@@ -514,6 +520,7 @@ data class FsPosUser(
     val role: String = "CAJERO",
     val avatarUrl: String = "",
     val earnCommission: Boolean = true,
+    val allowedModules: String = "",
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -524,6 +531,7 @@ data class FsPosUser(
         "role" to role,
         "avatarUrl" to avatarUrl,
         "earnCommission" to earnCommission,
+        "allowedModules" to allowedModules,
         "createdAt" to FieldValue.serverTimestamp(),
         "updatedAt" to FieldValue.serverTimestamp()
     )
@@ -546,6 +554,58 @@ data class FsDevice(
         "googleEmail" to googleEmail,
         "lastActiveAt" to FieldValue.serverTimestamp(),
         "createdAt" to FieldValue.serverTimestamp(),
+        "updatedAt" to FieldValue.serverTimestamp()
+    )
+}
+
+@Keep
+@IgnoreExtraProperties
+data class FsEncryptedBackup(
+    @DocumentId val id: String = "latest",
+    val userId: String = "",
+    val googleEmail: String = "",
+    val storeName: String = "",
+    val storeRif: String = "",
+    val deviceId: String = "",
+    val deviceModel: String = "",
+    val formatVersion: Int = 2,
+    val productsCount: Int = 0,
+    val salesCount: Int = 0,
+    val customersCount: Int = 0,
+    val exportedAtMs: Long = 0L,
+    val encryptedPayload: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun toCreateMap(uid: String): Map<String, Any> = mapOf(
+        "userId" to uid,
+        "googleEmail" to googleEmail.take(200),
+        "storeName" to storeName.take(120),
+        "storeRif" to storeRif.take(40),
+        "deviceId" to deviceId.take(128),
+        "deviceModel" to deviceModel.take(120),
+        "formatVersion" to formatVersion,
+        "productsCount" to productsCount,
+        "salesCount" to salesCount,
+        "customersCount" to customersCount,
+        "exportedAtMs" to exportedAtMs,
+        "encryptedPayload" to encryptedPayload,
+        "createdAt" to FieldValue.serverTimestamp(),
+        "updatedAt" to FieldValue.serverTimestamp()
+    )
+
+    fun toUpdateMap(): Map<String, Any> = mapOf(
+        "googleEmail" to googleEmail.take(200),
+        "storeName" to storeName.take(120),
+        "storeRif" to storeRif.take(40),
+        "deviceId" to deviceId.take(128),
+        "deviceModel" to deviceModel.take(120),
+        "formatVersion" to formatVersion,
+        "productsCount" to productsCount,
+        "salesCount" to salesCount,
+        "customersCount" to customersCount,
+        "exportedAtMs" to exportedAtMs,
+        "encryptedPayload" to encryptedPayload,
         "updatedAt" to FieldValue.serverTimestamp()
     )
 }

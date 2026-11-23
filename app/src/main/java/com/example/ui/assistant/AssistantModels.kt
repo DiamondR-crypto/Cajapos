@@ -94,6 +94,15 @@ sealed class PendingAssistantAction {
         val productName: String
     ) : PendingAssistantAction()
 
+    data class UpdateProductPriceAction(
+        val productId: Int,
+        val productName: String,
+        val currentPriceUsd: Double,
+        val newPriceUsd: Double,
+        val currentWholesaleUsd: Double = 0.0,
+        val newWholesaleUsd: Double? = null
+    ) : PendingAssistantAction()
+
     data class SelectDisambiguation(
         val candidates: List<DisambiguationItem>,
         val actionIntent: String, // "ADD_STOCK" or "QUERY_PRODUCT"

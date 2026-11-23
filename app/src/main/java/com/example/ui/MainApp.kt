@@ -1,9 +1,14 @@
 package com.example.ui
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
@@ -22,9 +27,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,19 +43,31 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.R
+import com.example.data.local.Product
+import com.example.ui.assistant.AssistantChatDialog
+import com.example.ui.cashea.CasheaScreen
 import com.example.ui.customers.CustomersScreen
 import com.example.ui.dashboard.DashboardScreen
+import com.example.ui.delivery.DeliveryNotesScreen
+import com.example.ui.expenses.ExpensesScreen
+import com.example.ui.home.HomeModulesScreen
+import com.example.ui.inventory.InventoryAlertsDialog
 import com.example.ui.inventory.InventoryScreen
 import com.example.ui.invoices.InvoicesScreen
+import com.example.ui.navigation.MainModuleGroup
+import com.example.ui.navigation.ModulePermissions
+import com.example.ui.navigation.Screen
 import com.example.ui.pos.PosScreen
+import com.example.ui.posterminal.PosTerminalRecordsScreen
 import com.example.ui.quotes.QuotesScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.summary.SummaryScreen
 import com.example.ui.suppliers.SuppliersScreen
 import com.example.ui.users.UsersScreen
-import com.example.ui.expenses.ExpensesScreen
 import com.example.ui.withholding.WithholdingsScreen
-import com.example.ui.assistant.AssistantChatDialog
+import com.example.utils.StockAlertNotificationHelper
+import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,61 +75,130 @@ import kotlin.math.roundToInt
 fun MainApp(viewModel: PosViewModel) {
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val backupMode by viewModel.backupMode.collectAsStateWithLifecycle()
-    val googleAccount by viewModel.googleAccount.collectAsStateWithLifecycle()
-    
+    val bcvRate by viewModel.bcvRate.collectAsStateWithLifecycle()
+
     if (currentUser == null) {
         LoginScreen(viewModel)
         return
     }
 
+    val context = LocalContext.current
+    val allProducts by viewModel.allProducts.collectAsStateWithLifecycle()
+    val lowStockAlertProducts by viewModel.lowStockAlertProducts.collectAsStateWithLifecycle()
+    val systemNotifications by viewModel.systemNotifications.collectAsStateWithLifecycle()
+
     val navController = rememberNavController()
     var showAssistantChat by remember { mutableStateOf(false) }
+    var showStockAlertsDialog by remember { mutableStateOf(false) }
+    var autoAlertBannerProducts by remember { mutableStateOf<List<Product>>(emptyList()) }
     var isSidebarVisible by remember { mutableStateOf(false) } // Default hidden to give maximum screen space
     var isSidebarExpanded by remember { mutableStateOf(true) }
+    var expandedSidebarGroups by remember {
+        mutableStateOf(MainModuleGroup.entries.map { it.id }.toSet())
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted && lowStockAlertProducts.isNotEmpty()) {
+            StockAlertNotificationHelper.notifyLowStockProducts(context, lowStockAlertProducts, allProducts)
+        }
+    }
+
+    LaunchedEffect(currentUser?.id) {
+        StockAlertNotificationHelper.ensureChannel(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !StockAlertNotificationHelper.hasPostNotificationPermission(context)
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    // Automatic real-time observer: fires Android OS notification + in-app alert banner
+    // whenever any product newly reaches or drops further below its defined minimum stock.
+    val lastAlertedStockByProductId = remember(currentUser?.id) { mutableStateMapOf<Int, Double>() }
+    LaunchedEffect(lowStockAlertProducts, allProducts) {
+        val currentTriggeredIds = lowStockAlertProducts.map { it.id }.toSet()
+        val staleIds = lastAlertedStockByProductId.keys.filter { it !in currentTriggeredIds }
+        staleIds.forEach { lastAlertedStockByProductId.remove(it) }
+
+        val newlyTriggered = mutableListOf<Product>()
+        lowStockAlertProducts.forEach { product ->
+            val eff = product.effectiveStockForAlert(allProducts)
+            val prev = lastAlertedStockByProductId[product.id]
+            if (prev == null || eff < prev - 1e-6) {
+                newlyTriggered.add(product)
+                lastAlertedStockByProductId[product.id] = eff
+            }
+        }
+
+        if (newlyTriggered.isNotEmpty()) {
+            StockAlertNotificationHelper.notifyLowStockProducts(context, newlyTriggered, allProducts)
+            autoAlertBannerProducts = newlyTriggered
+        }
+    }
+
+    LaunchedEffect(autoAlertBannerProducts) {
+        if (autoAlertBannerProducts.isNotEmpty()) {
+            delay(7500L)
+            autoAlertBannerProducts = emptyList()
+        }
+    }
 
     val canUseAssistant = remember(currentUser?.role) {
-        val r = currentUser?.role?.uppercase(java.util.Locale.ROOT).orEmpty()
+        val r = currentUser?.role?.uppercase(Locale.ROOT).orEmpty()
         r == "ADMIN" || r == "ADMINISTRADOR" || r == "SUPERVISOR"
     }
-    
+
     val storeName by viewModel.storeName.collectAsStateWithLifecycle()
     val cleanStoreName = storeName.ifBlank { "Mi Negocio" }
 
-    val allItems = listOf(
-        Screen.Pos,
-        Screen.Quotes,
-        Screen.Dashboard,
-        Screen.Inventory,
-        Screen.Invoices,
-        Screen.Expenses,
-        Screen.Withholdings,
-        Screen.Summary,
-        Screen.Customers,
-        Screen.Suppliers,
-        Screen.Users,
-        Screen.Settings
-    )
-
-    // Filter items based on role (Dashboard ONLY for ADMIN/ADMINISTRADOR)
-    val items = allItems.filter { screen ->
-        val role = currentUser!!.role.uppercase(java.util.Locale.ROOT)
-        when {
-            role == "ADMIN" || role == "ADMINISTRADOR" -> true
-            role == "SUPERVISOR" -> screen != Screen.Dashboard && screen != Screen.Users && screen != Screen.Settings && screen != Screen.Pos
-            role == "CASHIER" || role == "CAJERO" -> screen != Screen.Dashboard && screen != Screen.Users && screen != Screen.Settings && screen != Screen.Suppliers
-            else -> false
-        }
+    val allowedRoutes = remember(currentUser) {
+        ModulePermissions.resolveAllowedRoutes(currentUser!!)
     }
-    
-    val startDest = if (currentUser!!.role == "SUPERVISOR") Screen.Inventory.route else Screen.Pos.route
-    
+
+    val items = remember(allowedRoutes) {
+        Screen.allSubModules.filter { it.route in allowedRoutes }
+    }
+
+    val startDest = Screen.Home.route
+
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    
+    val isPosScreen = currentRoute == Screen.Pos.route
+
+    val navigateToRoute: (String) -> Unit = { targetRoute ->
+        if (targetRoute == Screen.Home.route || targetRoute in allowedRoutes) {
+            isSidebarVisible = false
+            navController.navigate(targetRoute) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    saveState = true
+                }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
+    // Redirect back to Home if permissions changed and current route is no longer allowed
+    LaunchedEffect(currentRoute, allowedRoutes) {
+        if (currentRoute != null && currentRoute != Screen.Home.route && currentRoute !in allowedRoutes) {
+            navController.navigate(Screen.Home.route) {
+                popUpTo(navController.graph.findStartDestination().id) {
+                    inclusive = false
+                }
+                launchSingleTop = true
+            }
+        }
+    }
+
     val dynamicTitle = when (currentRoute) {
+        Screen.Home.route -> "Inicio • \"$cleanStoreName\""
         Screen.Inventory.route -> "Inventario de \"$cleanStoreName\""
         Screen.Dashboard.route -> "Resumen gráfico de \"$cleanStoreName\""
         Screen.Invoices.route -> "Facturas de \"$cleanStoreName\""
+        Screen.Cashea.route -> "Cashea de \"$cleanStoreName\""
+        Screen.PosTerminals.route -> "Puntos de Venta de \"$cleanStoreName\""
         Screen.Customers.route -> "Clientes de \"$cleanStoreName\""
         Screen.Summary.route -> "Resumen diario de \"$cleanStoreName\""
         Screen.Suppliers.route -> "Proveedores de \"$cleanStoreName\""
@@ -119,6 +208,7 @@ fun MainApp(viewModel: PosViewModel) {
         Screen.Settings.route -> "Ajustes de \"$cleanStoreName\""
         Screen.Pos.route -> "SmartPOS286 de \"$cleanStoreName\""
         Screen.Quotes.route -> "Presupuestos de \"$cleanStoreName\""
+        Screen.DeliveryNotes.route -> "Notas de Entrega de \"$cleanStoreName\""
         else -> items.find { it.route == currentRoute }?.title ?: "SmartPOS286"
     }
 
@@ -167,7 +257,7 @@ fun MainApp(viewModel: PosViewModel) {
         )
 
         Row(modifier = Modifier.fillMaxSize()) {
-            // Fully Hidable & Collapsible Navigation Rail / Drawer
+            // Fully Hidable & Collapsible Hierarchical Navigation Rail
             AnimatedVisibility(
                 visible = isSidebarVisible,
                 enter = slideInHorizontally(initialOffsetX = { -it }) + fadeIn(),
@@ -175,9 +265,9 @@ fun MainApp(viewModel: PosViewModel) {
             ) {
                 NavigationRail(
                     modifier = Modifier
-                        .widthIn(min = if (isSidebarExpanded) 190.dp else 72.dp, max = if (isSidebarExpanded) 200.dp else 76.dp)
+                        .widthIn(min = if (isSidebarExpanded) 232.dp else 74.dp, max = if (isSidebarExpanded) 244.dp else 78.dp)
                         .fillMaxHeight(),
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     header = {
                         Column(
@@ -193,7 +283,6 @@ fun MainApp(viewModel: PosViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                // Collapse / Expand width toggle
                                 IconButton(
                                     onClick = { isSidebarExpanded = !isSidebarExpanded },
                                     modifier = Modifier.size(32.dp)
@@ -205,7 +294,6 @@ fun MainApp(viewModel: PosViewModel) {
                                     )
                                 }
 
-                                // Hide completely button
                                 IconButton(
                                     onClick = { isSidebarVisible = false },
                                     modifier = Modifier.size(32.dp)
@@ -267,9 +355,11 @@ fun MainApp(viewModel: PosViewModel) {
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                         Text(
-                                            "${currentUser!!.username} • v1.0.1 BETA",
+                                            "${currentUser!!.username} • ${currentUser!!.role}",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -280,57 +370,258 @@ fun MainApp(viewModel: PosViewModel) {
                     Column(
                         modifier = Modifier
                             .fillMaxHeight()
+                            .padding(horizontal = if (isSidebarExpanded) 10.dp else 4.dp)
                             .verticalScroll(rememberScrollState()),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        horizontalAlignment = if (isSidebarExpanded) Alignment.Start else Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        items.forEach { screen ->
-                            val selected = currentRoute == screen.route
-                            NavigationRailItem(
-                                selected = selected,
-                                onClick = {
-                                    isSidebarVisible = false
-                                    navController.navigate(screen.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
+                        if (isSidebarExpanded) {
+                            // Top Home button in expanded drawer
+                            val homeSelected = currentRoute == Screen.Home.route
+                            Surface(
+                                onClick = { navigateToRoute(Screen.Home.route) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (homeSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                } else {
+                                    Color.Transparent
                                 },
-                                icon = { Icon(screen.icon, contentDescription = screen.title) },
-                                label = {
-                                    Text(
-                                        screen.title,
-                                        maxLines = 1,
-                                        fontSize = if (isSidebarExpanded) 12.sp else 10.5.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .minimumInteractiveComponentSize()
+                                    .testTag("sidebar_item_home")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Screen.Home.icon,
+                                        contentDescription = Screen.Home.title,
+                                        tint = if (homeSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                },
-                                alwaysShowLabel = isSidebarExpanded || selected,
-                                colors = NavigationRailItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                    Text(
+                                        text = Screen.Home.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (homeSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = if (homeSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.padding(vertical = 4.dp)
                             )
+
+                            // Hierarchical Main Modules & Submodules
+                            MainModuleGroup.entries.forEach { group ->
+                                val groupSubModules = Screen.subModulesForGroup(group).filter { it.route in allowedRoutes }
+                                val hasLogout = group == MainModuleGroup.CONFIG
+                                if (groupSubModules.isNotEmpty() || hasLogout) {
+                                    val isGroupExpanded = group.id in expandedSidebarGroups
+                                    val containsSelectedRoute = groupSubModules.any { it.route == currentRoute }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (containsSelectedRoute) {
+                                            group.accentColor.copy(alpha = 0.1f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable {
+                                                expandedSidebarGroups = if (isGroupExpanded) {
+                                                    expandedSidebarGroups - group.id
+                                                } else {
+                                                    expandedSidebarGroups + group.id
+                                                }
+                                            }
+                                            .testTag("sidebar_group_${group.id.lowercase(Locale.ROOT)}")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = group.icon,
+                                                contentDescription = group.title,
+                                                tint = group.accentColor,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                            Text(
+                                                text = group.title,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (containsSelectedRoute) group.accentColor else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Icon(
+                                                imageVector = if (isGroupExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                                contentDescription = if (isGroupExpanded) "Plegar ${group.title}" else "Desplegar ${group.title}",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    AnimatedVisibility(visible = isGroupExpanded) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = 10.dp, top = 2.dp, bottom = 4.dp),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            groupSubModules.forEach { screen ->
+                                                val selected = currentRoute == screen.route
+                                                Surface(
+                                                    onClick = { navigateToRoute(screen.route) },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (selected) {
+                                                        group.accentColor.copy(alpha = 0.16f)
+                                                    } else {
+                                                        Color.Transparent
+                                                    },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .minimumInteractiveComponentSize()
+                                                        .testTag("sidebar_item_${screen.route}")
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = screen.icon,
+                                                            contentDescription = screen.title,
+                                                            tint = if (selected) group.accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                        Text(
+                                                            text = screen.title,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontSize = 12.5.sp,
+                                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                                            color = if (selected) group.accentColor else MaterialTheme.colorScheme.onSurface,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            if (hasLogout) {
+                                                Surface(
+                                                    onClick = { viewModel.logout() },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .minimumInteractiveComponentSize()
+                                                        .testTag("sidebar_item_logout")
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                                            contentDescription = "Salir",
+                                                            tint = MaterialTheme.colorScheme.error,
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                        Text(
+                                                            text = "Salir",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            fontSize = 12.5.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = MaterialTheme.colorScheme.error,
+                                                            maxLines = 1
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Collapsed compact rail mode (icons grouped cleanly)
+                            NavigationRailItem(
+                                selected = currentRoute == Screen.Home.route,
+                                onClick = { navigateToRoute(Screen.Home.route) },
+                                icon = { Icon(Screen.Home.icon, contentDescription = Screen.Home.title) },
+                                label = { Text("Inicio", fontSize = 10.sp, maxLines = 1) },
+                                alwaysShowLabel = currentRoute == Screen.Home.route
+                            )
+
+                            MainModuleGroup.entries.forEach { group ->
+                                val groupSubModules = Screen.subModulesForGroup(group).filter { it.route in allowedRoutes }
+                                val hasLogout = group == MainModuleGroup.CONFIG
+                                if (groupSubModules.isNotEmpty() || hasLogout) {
+                                    HorizontalDivider(
+                                        color = group.accentColor.copy(alpha = 0.35f),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                    )
+                                    groupSubModules.forEach { screen ->
+                                        val selected = currentRoute == screen.route
+                                        NavigationRailItem(
+                                            selected = selected,
+                                            onClick = { navigateToRoute(screen.route) },
+                                            icon = { Icon(screen.icon, contentDescription = screen.title) },
+                                            label = {
+                                                Text(
+                                                    screen.title,
+                                                    maxLines = 1,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                                )
+                                            },
+                                            alwaysShowLabel = selected,
+                                            colors = NavigationRailItemDefaults.colors(
+                                                selectedIconColor = group.accentColor,
+                                                selectedTextColor = group.accentColor,
+                                                indicatorColor = group.accentColor.copy(alpha = 0.16f),
+                                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        )
+                                    }
+                                    if (hasLogout) {
+                                        NavigationRailItem(
+                                            selected = false,
+                                            onClick = { viewModel.logout() },
+                                            icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Salir") },
+                                            label = { Text("Salir", fontSize = 10.sp) },
+                                            alwaysShowLabel = false,
+                                            colors = NavigationRailItemDefaults.colors(
+                                                unselectedIconColor = MaterialTheme.colorScheme.error,
+                                                unselectedTextColor = MaterialTheme.colorScheme.error
+                                            )
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        
-                        Spacer(modifier = Modifier.height(6.dp))
-                        
-                        NavigationRailItem(
-                            selected = false,
-                            onClick = { viewModel.logout() },
-                            icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Salir") },
-                            label = { Text("Salir", fontSize = 11.sp) },
-                            alwaysShowLabel = isSidebarExpanded,
-                            colors = NavigationRailItemDefaults.colors(
-                                unselectedIconColor = MaterialTheme.colorScheme.error,
-                                unselectedTextColor = MaterialTheme.colorScheme.error
-                            )
-                        )
+
                         Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
@@ -340,82 +631,155 @@ fun MainApp(viewModel: PosViewModel) {
             Scaffold(
                 containerColor = Color.Transparent, // Let the background show through
                 topBar = {
-                    TopAppBar(
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent,
-                            titleContentColor = MaterialTheme.colorScheme.onBackground
-                        ),
-                        navigationIcon = {
-                            // Menu toggle button in TopBar to show/hide sidebar completely
-                            IconButton(onClick = { isSidebarVisible = !isSidebarVisible }) {
-                                Icon(
-                                    if (isSidebarVisible) Icons.Filled.MenuOpen else Icons.Filled.Menu,
-                                    contentDescription = "Alternar menú principal",
-                                    tint = MaterialTheme.colorScheme.primary
+                    if (!isPosScreen) {
+                        TopAppBar(
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color.Transparent,
+                                titleContentColor = MaterialTheme.colorScheme.onBackground
+                            ),
+                            navigationIcon = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = { isSidebarVisible = !isSidebarVisible },
+                                        modifier = Modifier.testTag("topbar_menu_button")
+                                    ) {
+                                        Icon(
+                                            if (isSidebarVisible) Icons.Filled.MenuOpen else Icons.Filled.Menu,
+                                            contentDescription = "Alternar menú principal",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    if (currentRoute != Screen.Home.route) {
+                                        IconButton(
+                                            onClick = { navigateToRoute(Screen.Home.route) },
+                                            modifier = Modifier.testTag("topbar_home_button")
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.Home,
+                                                contentDescription = "Ir a módulos principales",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            title = {
+                                Text(
+                                    text = dynamicTitle,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                            }
-                        },
-                        title = { 
-                            Text(
-                                text = dynamicTitle, 
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.headlineSmall
-                            ) 
-                        },
-                        actions = {
-                            // Backup Mode status pill
-                            Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (backupMode == "GOOGLE_CLOUD") 
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-                                else 
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.padding(end = 16.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            },
+                            actions = {
+                                val nonStockAlertsCount = systemNotifications.count { it.type != NotificationType.LOW_STOCK }
+                                val totalAlertBadge = lowStockAlertProducts.size + nonStockAlertsCount
+                                Box(modifier = Modifier.padding(end = 4.dp)) {
+                                    IconButton(
+                                        onClick = { showStockAlertsDialog = true },
+                                        modifier = Modifier.testTag("topbar_notifications_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (lowStockAlertProducts.isNotEmpty()) Icons.Filled.NotificationsActive else Icons.Filled.Notifications,
+                                            contentDescription = "Alertas de stock e inventario",
+                                            tint = if (lowStockAlertProducts.isNotEmpty()) Color(0xFFDC2626) else MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                    if (totalAlertBadge > 0) {
+                                        Badge(
+                                            containerColor = if (lowStockAlertProducts.isNotEmpty()) Color(0xFFDC2626) else Color(0xFFD97706),
+                                            contentColor = Color.White,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(top = 4.dp, end = 4.dp)
+                                        ) {
+                                            Text(if (totalAlertBadge > 99) "99+" else totalAlertBadge.toString())
+                                        }
+                                    }
+                                }
+
+                                // Backup Mode status pill
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (backupMode == "GOOGLE_CLOUD")
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                    else
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.padding(end = 16.dp)
                                 ) {
-                                    Icon(
-                                        if (backupMode == "GOOGLE_CLOUD") Icons.Filled.CloudDone else Icons.Filled.CloudOff,
-                                        contentDescription = null,
-                                        tint = if (backupMode == "GOOGLE_CLOUD") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = if (backupMode == "GOOGLE_CLOUD") "Nube Google" else "Offline",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            if (backupMode == "GOOGLE_CLOUD") Icons.Filled.CloudDone else Icons.Filled.CloudOff,
+                                            contentDescription = null,
+                                            tint = if (backupMode == "GOOGLE_CLOUD") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = if (backupMode == "GOOGLE_CLOUD") "Nube Google" else "Offline",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             ) { innerPadding ->
                 NavHost(
-                    navController = navController, 
-                    startDestination = startDest, 
+                    navController = navController,
+                    startDestination = startDest,
                     modifier = Modifier
                         .padding(innerPadding)
-                        .padding(end = 12.dp, bottom = 12.dp)
+                        .consumeWindowInsets(innerPadding)
+                        .padding(
+                            end = if (isPosScreen) 0.dp else 12.dp,
+                            bottom = if (isPosScreen) 0.dp else 12.dp
+                        )
                         .imePadding() // Adjust layout dynamically when software keyboard opens
                         .fillMaxSize()
                         .clip(MaterialTheme.shapes.large)
                 ) {
-                    composable(Screen.Pos.route) { PosScreen(viewModel) }
+                    composable(Screen.Home.route) {
+                        HomeModulesScreen(
+                            storeName = cleanStoreName,
+                            currentUser = currentUser!!,
+                            bcvRate = bcvRate,
+                            allowedRoutes = allowedRoutes,
+                            onNavigateToSubModule = { route -> navigateToRoute(route) },
+                            onLogout = { viewModel.logout() }
+                        )
+                    }
+                    composable(Screen.Pos.route) {
+                        PosScreen(
+                            viewModel = viewModel,
+                            isSidebarVisible = isSidebarVisible,
+                            onToggleMenu = { isSidebarVisible = !isSidebarVisible },
+                            onNavigateHome = { navigateToRoute(Screen.Home.route) }
+                        )
+                    }
                     composable(Screen.Quotes.route) {
                         QuotesScreen(
                             viewModel = viewModel,
                             onNavigateToPos = {
-                                navController.navigate(Screen.Pos.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                if (Screen.Pos.route in allowedRoutes) {
+                                    navigateToRoute(Screen.Pos.route)
+                                }
+                            }
+                        )
+                    }
+                    composable(Screen.DeliveryNotes.route) {
+                        DeliveryNotesScreen(
+                            viewModel = viewModel,
+                            onNavigateToPos = {
+                                if (Screen.Pos.route in allowedRoutes) {
+                                    navigateToRoute(Screen.Pos.route)
                                 }
                             }
                         )
@@ -423,6 +787,8 @@ fun MainApp(viewModel: PosViewModel) {
                     composable(Screen.Dashboard.route) { DashboardScreen(viewModel) }
                     composable(Screen.Inventory.route) { InventoryScreen(viewModel) }
                     composable(Screen.Invoices.route) { InvoicesScreen(viewModel) }
+                    composable(Screen.Cashea.route) { CasheaScreen(viewModel) }
+                    composable(Screen.PosTerminals.route) { PosTerminalRecordsScreen(viewModel) }
                     composable(Screen.Expenses.route) { ExpensesScreen(viewModel) }
                     composable(Screen.Withholdings.route) { WithholdingsScreen(viewModel) }
                     composable(Screen.Summary.route) { SummaryScreen(viewModel) }
@@ -434,6 +800,77 @@ fun MainApp(viewModel: PosViewModel) {
             }
         }
 
+        // Automatic floating in-app alert banner for real-time low-stock triggers
+        AnimatedVisibility(
+            visible = autoAlertBannerProducts.isNotEmpty(),
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            val firstProduct = autoAlertBannerProducts.firstOrNull()
+            if (firstProduct != null) {
+                val eff = firstProduct.effectiveStockForAlert(allProducts).coerceAtLeast(0.0)
+                val summaryText = if (autoAlertBannerProducts.size == 1) {
+                    "${firstProduct.name}: ${StockAlertNotificationHelper.formatStockQuantity(eff)} u. (Mín: ${StockAlertNotificationHelper.formatStockQuantity(firstProduct.minStockAlertQuantity)})"
+                } else {
+                    "${firstProduct.name} y ${autoAlertBannerProducts.size - 1} producto(s) más alcanzaron su mínimo"
+                }
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .testTag("auto_low_stock_floating_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.NotificationsActive,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Alerta de Stock Mínimo",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = summaryText,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                autoAlertBannerProducts = emptyList()
+                                showStockAlertsDialog = true
+                            }
+                        ) {
+                            Text("Ver", fontWeight = FontWeight.Bold)
+                        }
+                        IconButton(
+                            onClick = { autoAlertBannerProducts = emptyList() },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Ocultar alerta", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+
         // Draggable floating assistant chat bubble positioned comfortably above interface buttons
         DraggableAssistantBubble(
             canUseAssistant = canUseAssistant,
@@ -441,18 +878,29 @@ fun MainApp(viewModel: PosViewModel) {
         )
     }
 
+    if (showStockAlertsDialog) {
+        val roleUpper = currentUser?.role?.uppercase(Locale.ROOT).orEmpty()
+        val canManageAlerts = (roleUpper == "ADMIN" || roleUpper == "ADMINISTRADOR" || roleUpper == "SUPERVISOR") &&
+            (Screen.Inventory.route in allowedRoutes)
+        InventoryAlertsDialog(
+            lowStockProducts = lowStockAlertProducts,
+            allProducts = allProducts,
+            systemNotifications = systemNotifications,
+            canManageAlerts = canManageAlerts,
+            onDisableProductAlert = { p ->
+                viewModel.setProductStockAlert(p, enabled = false)
+            },
+            onGoToInventory = if (Screen.Inventory.route in allowedRoutes && currentRoute != Screen.Inventory.route) {
+                { navigateToRoute(Screen.Inventory.route) }
+            } else null,
+            onDismiss = { showStockAlertsDialog = false }
+        )
+    }
+
     if (showAssistantChat) {
         AssistantChatDialog(
             viewModel = viewModel,
-            onNavigateToRoute = { route ->
-                navController.navigate(route) {
-                    popUpTo(navController.graph.findStartDestination().id) {
-                        saveState = true
-                    }
-                    launchSingleTop = true
-                    restoreState = true
-                }
-            },
+            onNavigateToRoute = { route -> navigateToRoute(route) },
             onDismiss = { showAssistantChat = false }
         )
     }
@@ -469,7 +917,7 @@ fun DraggableAssistantBubble(
         val density = LocalDensity.current
         val bubbleSizeDp = 56.dp
         val bubbleSizePx = with(density) { bubbleSizeDp.toPx() }
-        
+
         val maxPxX = (constraints.maxWidth - bubbleSizePx - with(density) { 16.dp.toPx() }).coerceAtLeast(0f)
         val maxPxY = (constraints.maxHeight - bubbleSizePx - with(density) { 60.dp.toPx() }).coerceAtLeast(0f)
         val minPxX = with(density) { 16.dp.toPx() }
@@ -544,17 +992,3 @@ fun DraggableAssistantBubble(
     }
 }
 
-sealed class Screen(val route: String, val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    object Pos : Screen("pos", "Facturación", Icons.Filled.Home)
-    object Quotes : Screen("quotes", "Presupuestos", Icons.Filled.RequestQuote)
-    object Dashboard : Screen("dashboard", "Dashboard", Icons.Filled.SpaceDashboard)
-    object Inventory : Screen("inventory", "Inventario", Icons.Filled.Inventory)
-    object Invoices : Screen("invoices", "Facturas", Icons.Filled.Receipt)
-    object Expenses : Screen("expenses", "Gastos", Icons.Filled.ReceiptLong)
-    object Withholdings : Screen("withholdings", "Retenciones", Icons.Filled.Policy)
-    object Summary : Screen("summary", "Resumen", Icons.Filled.Analytics)
-    object Customers : Screen("customers", "Clientes", Icons.Filled.People)
-    object Suppliers : Screen("suppliers", "Proveedores", Icons.Filled.LocalShipping)
-    object Users : Screen("users", "Usuarios", Icons.Filled.Person)
-    object Settings : Screen("settings", "Ajustes", Icons.Filled.Settings)
-}

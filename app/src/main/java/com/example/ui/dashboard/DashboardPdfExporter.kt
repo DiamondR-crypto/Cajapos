@@ -49,14 +49,16 @@ object DashboardPdfExporter {
         unitProductsCount: Int,
         topProducts: List<DashboardProductRank>,
         topCustomers: List<DashboardCustomerRank>,
-        paymentBreakdownUsd: Map<String, Double>
+        paymentBreakdownUsd: Map<String, Double>,
+        casheaCommissionUsd: Double = 0.0,
+        grossSalesUsd: Double = totalSalesUsd
     ): File? {
         val pdfDocument = PdfDocument()
         val pageWidth = 595 // A4 width
         val pageHeight = 842 // A4 height
-        val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
-        val page = pdfDocument.startPage(pageInfo)
-        val canvas: Canvas = page.canvas
+        var pageNumber = 1
+        var page = pdfDocument.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+        var canvas: Canvas = page.canvas
 
         val leftMargin = 36f
         val rightMargin = pageWidth - 36f
@@ -113,11 +115,16 @@ object DashboardPdfExporter {
         val cardH = 50f
 
         // Card 1: Ingresos Totales
+        val incomeSub = if (casheaCommissionUsd > 0.001) {
+            String.format(Locale.US, "Bs. %.2f • Bruto $%.2f (-$%.2f Cashea)", totalSalesBs, grossSalesUsd, casheaCommissionUsd)
+        } else {
+            String.format(Locale.US, "%.2f Bs.", totalSalesBs)
+        }
         drawKpiCard(
             canvas, leftMargin, y, cardW, cardH,
-            "INGRESOS TOTALES (VENTAS)",
+            "INGRESOS NETOS (VENTAS)",
             String.format(Locale.US, "$%.2f USD", totalSalesUsd),
-            String.format(Locale.US, "%.2f Bs.", totalSalesBs),
+            incomeSub,
             "#065F46", "#D1FAE5"
         )
 
@@ -235,17 +242,63 @@ object DashboardPdfExporter {
             y += 20f
         }
 
+        // --- SECTION 5: DESGLOSE POR MÉTODO DE PAGO ---
+        if (paymentBreakdownUsd.isNotEmpty()) {
+            y += 14f
+            val neededForPayments = 50f + (paymentBreakdownUsd.size * 18f)
+            if (y + neededForPayments > pageHeight - 50f) {
+                paint.color = Color.parseColor("#94A3B8")
+                paint.textSize = 9f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+                paint.textAlign = Paint.Align.CENTER
+                canvas.drawText("DOCUMENTO INTERNO DE CONTROL GERENCIAL - Página $pageNumber", pageWidth / 2f, pageHeight - 25f, paint)
+                pdfDocument.finishPage(page)
+                pageNumber++
+                page = pdfDocument.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageNumber).create())
+                canvas = page.canvas
+                y = 40f
+            }
+
+            paint.textAlign = Paint.Align.LEFT
+            paint.color = Color.parseColor("#312E81")
+            paint.textSize = 13f
+            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            canvas.drawText("5. DESGLOSE DE INGRESOS POR MÉTODO DE PAGO", leftMargin, y, paint)
+            y += 10f
+            paint.color = Color.parseColor("#E2E8F0")
+            canvas.drawLine(leftMargin, y, rightMargin, y, paint)
+            y += 14f
+
+            val totalPay = paymentBreakdownUsd.values.sum().coerceAtLeast(0.001)
+            paymentBreakdownUsd.entries.forEachIndexed { idx, (method, amount) ->
+                paint.color = if (idx % 2 == 0) Color.WHITE else Color.parseColor("#F8FAFC")
+                canvas.drawRect(leftMargin, y - 10f, rightMargin, y + 8f, paint)
+
+                paint.color = Color.parseColor("#0F172A")
+                paint.textSize = 9.5f
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                paint.textAlign = Paint.Align.LEFT
+                canvas.drawText(method, leftMargin + 8f, y + 2f, paint)
+
+                val pct = (amount / totalPay) * 100.0
+                paint.textAlign = Paint.Align.RIGHT
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                canvas.drawText(String.format(Locale.US, "$%.2f USD (%.1f%%)", amount, pct), rightMargin - 8f, y + 2f, paint)
+                y += 18f
+            }
+        }
+
         // Footer Note
-        y = pageHeight - 40f
         paint.color = Color.parseColor("#94A3B8")
         paint.textSize = 9f
         paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
         paint.textAlign = Paint.Align.CENTER
-        canvas.drawText("DOCUMENTO INTERNO DE CONTROL GERENCIAL - SmartPOS286", pageWidth / 2f, y, paint)
+        canvas.drawText("DOCUMENTO INTERNO DE CONTROL GERENCIAL • Página $pageNumber", pageWidth / 2f, pageHeight - 25f, paint)
 
         pdfDocument.finishPage(page)
 
-        val outputFile = File(context.cacheDir, "Dashboard_${monthYearTitle.replace(" ", "_")}.pdf")
+        val safeTitle = monthYearTitle.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        val outputFile = File(context.cacheDir, "Dashboard_$safeTitle.pdf")
         return try {
             val fos = FileOutputStream(outputFile)
             pdfDocument.writeTo(fos)

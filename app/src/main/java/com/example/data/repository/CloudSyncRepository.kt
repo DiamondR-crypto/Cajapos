@@ -966,6 +966,20 @@ class CloudSyncRepository(private val localRepository: AppRepository) {
                 }
             }
 
+            val existingPosRecords = localRepository.allPosTerminalRecords.first()
+            for (posRec in backup.posTerminalRecords) {
+                val alreadyExists = existingPosRecords.any {
+                    it.createdAt == posRec.createdAt ||
+                        (posRec.referenceNumber.isNotBlank() &&
+                            it.referenceNumber == posRec.referenceNumber &&
+                            it.receiptNumber == posRec.receiptNumber &&
+                            it.totalAmount == posRec.totalAmount)
+                }
+                if (!alreadyExists) {
+                    localRepository.insertPosTerminalRecord(posRec.copy(id = 0))
+                }
+            }
+
             Log.i(TAG, "¡Restauración automática completa para $googleAccount exitosa!")
             backup
         } catch (e: Exception) {
@@ -991,6 +1005,7 @@ class CloudSyncRepository(private val localRepository: AppRepository) {
                 val expenses = localRepository.allExpenses.first()
                 val purchaseInvoices = localRepository.allPurchaseInvoices.first()
                 val users = localRepository.allUsers.first()
+                val posTerminalRecords = localRepository.allPosTerminalRecords.first()
 
                 val saleItems = mutableListOf<SaleItem>()
                 for (s in sales) {
@@ -1013,7 +1028,8 @@ class CloudSyncRepository(private val localRepository: AppRepository) {
                     purchaseInvoices = purchaseInvoices,
                     suppliers = suppliers,
                     expenses = expenses,
-                    users = users
+                    users = users,
+                    posTerminalRecords = posTerminalRecords
                 )
 
                 val jsonPayload = backupAdapter.toJson(fullBackup)

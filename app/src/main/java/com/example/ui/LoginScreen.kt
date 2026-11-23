@@ -43,6 +43,8 @@ import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.local.User
 import com.example.ui.components.AboutAppDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.bringIntoViewOnFocus
 import kotlinx.coroutines.launch
 
 @Composable
@@ -71,7 +73,9 @@ fun LoginScreen(viewModel: PosViewModel) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(win11Background),
+            .background(win11Background)
+            .systemBarsPadding()
+            .imePadding(),
         contentAlignment = Alignment.Center
     ) {
         // Ambient soft glowing orbs for Windows 11 acrylic depth
@@ -229,52 +233,55 @@ private fun UserSelectionStep(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (isCloudConnected) Color(0xFF059669).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                border = BorderStroke(1.dp, if (isCloudConnected) Color(0xFF059669).copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ResponsiveActionRow(
+            breakpoint = 380.dp,
+            verticalSpacing = 8.dp,
+            stackedActionAlignment = Alignment.End,
+            content = {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isCloudConnected) Color(0xFF059669).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    border = BorderStroke(1.dp, if (isCloudConnected) Color(0xFF059669).copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            if (isCloudConnected) Icons.Filled.CloudDone else Icons.Filled.Storage,
+                            contentDescription = null,
+                            tint = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = if (isCloudConnected) "Red Supabase Conectada" else "Modo Local (Offline)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            action = {
+                OutlinedButton(
+                    onClick = onAboutClick,
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                 ) {
                     Icon(
-                        if (isCloudConnected) Icons.Filled.CloudDone else Icons.Filled.Storage,
-                        contentDescription = null,
-                        tint = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
+                        Icons.Filled.HelpOutline,
+                        contentDescription = "Acerca de",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
                     )
-                    Text(
-                        text = if (isCloudConnected) "Red Supabase Conectada" else "Modo Local (Offline)",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isCloudConnected) Color(0xFF059669) else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Acerca de", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
-
-            OutlinedButton(
-                onClick = onAboutClick,
-                shape = RoundedCornerShape(20.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-            ) {
-                Icon(
-                    Icons.Filled.HelpOutline,
-                    contentDescription = "Acerca de",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Acerca de", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-        }
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -549,7 +556,7 @@ private fun PinInputStep(
                 }
             ),
             shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
         )
 
         if (error.isNotEmpty()) {
@@ -636,7 +643,7 @@ private fun ManualLoginStep(
             leadingIcon = { Icon(Icons.Filled.AccountCircle, contentDescription = null) },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
         )
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -659,7 +666,7 @@ private fun ManualLoginStep(
                 }
             ),
             shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus()
         )
 
         if (error.isNotEmpty()) {

@@ -21,16 +21,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.local.PurchaseInvoice
 import com.example.data.local.Sale
 import com.example.ui.PosViewModel
+import com.example.ui.components.KeyboardAwareAlertDialog
+import com.example.ui.components.ResponsiveActionRow
+import com.example.ui.components.ResponsivePair
+import com.example.ui.components.bringIntoViewOnFocus
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun WithholdingsScreen(viewModel: PosViewModel) {
     val sales by viewModel.allSales.collectAsStateWithLifecycle()
@@ -102,62 +107,65 @@ fun WithholdingsScreen(viewModel: PosViewModel) {
             }
 
             // Summary Metrics Cards
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                // Client Withholdings Outstanding Card (Crédito a Favor)
-                Card(
-                    modifier = Modifier.weight(1f),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
-                    border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Filled.MoveToInbox, contentDescription = null, tint = Color(0xFF1D4ED8), modifier = Modifier.size(18.dp))
-                            Text("Retenciones de Clientes", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1E40AF))
+            ResponsivePair(
+                breakpoint = 340.dp,
+                horizontalSpacing = 10.dp,
+                verticalSpacing = 8.dp,
+                first = { mod ->
+                    // Client Withholdings Outstanding Card (Crédito a Favor)
+                    Card(
+                        modifier = mod,
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
+                        border = BorderStroke(1.dp, Color(0xFFBFDBFE)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Filled.MoveToInbox, contentDescription = null, tint = Color(0xFF1D4ED8), modifier = Modifier.size(18.dp))
+                                Text("Retenciones de Clientes", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF1E40AF))
+                            }
+                            Text(
+                                "\$${String.format(Locale.US, "%.2f", totalCustomerRetentionPendingUsd)} USD",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF1E3A8A)
+                            )
+                            Text(
+                                "Por cobrar voucher (${String.format(Locale.US, "%.2f", totalCustomerRetentionPendingUsd * effectiveRate)} Bs)",
+                                fontSize = 11.sp,
+                                color = Color(0xFF2563EB)
+                            )
                         }
-                        Text(
-                            "\$${String.format(Locale.US, "%.2f", totalCustomerRetentionPendingUsd)} USD",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF1E3A8A)
-                        )
-                        Text(
-                            "Por cobrar voucher (${String.format(Locale.US, "%.2f", totalCustomerRetentionPendingUsd * effectiveRate)} Bs)",
-                            fontSize = 11.sp,
-                            color = Color(0xFF2563EB)
-                        )
+                    }
+                },
+                second = { mod ->
+                    // Supplier Withholdings Pending SENIAT Card (Deuda con SENIAT)
+                    Card(
+                        modifier = mod,
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
+                        border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = Color(0xFFB91C1C), modifier = Modifier.size(18.dp))
+                                Text("Deuda Enterar al SENIAT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF991B1B))
+                            }
+                            Text(
+                                "\$${String.format(Locale.US, "%.2f", totalSupplierRetentionPendingUsd)} USD",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF7F1D1D)
+                            )
+                            Text(
+                                "Pendiente de enterar (${String.format(Locale.US, "%.2f", totalSupplierRetentionPendingUsd * effectiveRate)} Bs)",
+                                fontSize = 11.sp,
+                                color = Color(0xFFDC2626)
+                            )
+                        }
                     }
                 }
-
-                // Supplier Withholdings Pending SENIAT Card (Deuda con SENIAT)
-                Card(
-                    modifier = Modifier.weight(1f),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF2F2)),
-                    border = BorderStroke(1.dp, Color(0xFFFECACA)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Filled.AccountBalance, contentDescription = null, tint = Color(0xFFB91C1C), modifier = Modifier.size(18.dp))
-                            Text("Deuda Enterar al SENIAT", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Color(0xFF991B1B))
-                        }
-                        Text(
-                            "\$${String.format(Locale.US, "%.2f", totalSupplierRetentionPendingUsd)} USD",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF7F1D1D)
-                        )
-                        Text(
-                            "Pendiente de enterar (${String.format(Locale.US, "%.2f", totalSupplierRetentionPendingUsd * effectiveRate)} Bs)",
-                            fontSize = 11.sp,
-                            color = Color(0xFFDC2626)
-                        )
-                    }
-                }
-            }
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -228,6 +236,7 @@ fun WithholdingsScreen(viewModel: PosViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CustomerWithholdingCard(sale: Sale, viewModel: PosViewModel) {
     val context = LocalContext.current
@@ -243,92 +252,101 @@ fun CustomerWithholdingCard(sale: Sale, viewModel: PosViewModel) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(sale.customerName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("RIF/CI: ${sale.customerDocument}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                }
+            ResponsiveActionRow(
+                breakpoint = 330.dp,
+                verticalSpacing = 6.dp,
+                stackedActionAlignment = Alignment.Start,
+                content = {
+                    Column {
+                        Text(sale.customerName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        Text("RIF/CI: ${sale.customerDocument}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                action = {
+                    val (statusBg, statusText, statusLabel) = when (sale.withholdingStatus) {
+                        "RETENIDO_OK" -> Triple(Color(0xFFDCFCE7), Color(0xFF166534), "COMPROBANTE RECIBIDO ✓")
+                        else -> Triple(Color(0xFFFEF3C7), Color(0xFF92400E), "PENDIENTE VOUCHER ⏳")
+                    }
 
-                // Status Badge
-                val (statusBg, statusText, statusLabel) = when (sale.withholdingStatus) {
-                    "RETENIDO_OK" -> Triple(Color(0xFFDCFCE7), Color(0xFF166534), "COMPROBANTE RECIBIDO ✓")
-                    else -> Triple(Color(0xFFFEF3C7), Color(0xFF92400E), "PENDIENTE VOUCHER ⏳")
+                    Surface(shape = RoundedCornerShape(6.dp), color = statusBg) {
+                        Text(
+                            statusLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = statusText,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
-
-                Surface(shape = RoundedCornerShape(6.dp), color = statusBg) {
-                    Text(
-                        statusLabel,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = statusText,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
+            )
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("Factura #${sale.id} • ${dateFormat.format(Date(sale.timestamp))}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Monto Total Factura: \$${String.format(Locale.US, "%.2f", sale.totalUsd)} USD", style = MaterialTheme.typography.bodySmall)
+            ResponsiveActionRow(
+                breakpoint = 310.dp,
+                verticalSpacing = 4.dp,
+                stackedActionAlignment = Alignment.Start,
+                content = {
+                    Column {
+                        Text("Factura #${sale.id} • ${dateFormat.format(Date(sale.timestamp))}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Monto Total Factura: \$${String.format(Locale.US, "%.2f", sale.totalUsd)} USD", style = MaterialTheme.typography.bodySmall)
+                    }
+                },
+                action = {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Monto Retenido:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("\$${String.format(Locale.US, "%.2f", totalRetainedUsd)} USD", fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8), style = MaterialTheme.typography.titleMedium)
+                    }
                 }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Monto Retenido:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("\$${String.format(Locale.US, "%.2f", totalRetainedUsd)} USD", fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8), style = MaterialTheme.typography.titleMedium)
-                }
-            }
+            )
 
             // Breakdown
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.SpaceAround
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text("Ret. IVA (${sale.retencionIvaPercentage.toInt()}%): \$${String.format(Locale.US, "%.2f", sale.retencionIvaUsd)} USD", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     Text("Ret. ISLR (${sale.retencionIslrPercentage.toInt()}%): \$${String.format(Locale.US, "%.2f", sale.retencionIslrUsd)} USD", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (sale.withholdingVoucherNumber.isNotBlank()) "N° Comprobante: ${sale.withholdingVoucherNumber}" else "Sin N° comprobante asignado",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Button(
-                    onClick = { showVoucherDialog = true },
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Icon(Icons.Filled.ConfirmationNumber, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(if (sale.withholdingStatus == "RETENIDO_OK") "Editar Comprobante" else "Registrar Comprobante", fontSize = 12.sp)
+            ResponsiveActionRow(
+                breakpoint = 340.dp,
+                verticalSpacing = 8.dp,
+                stackedActionAlignment = Alignment.End,
+                content = {
+                    Text(
+                        text = if (sale.withholdingVoucherNumber.isNotBlank()) "N° Comprobante: ${sale.withholdingVoucherNumber}" else "Sin N° comprobante asignado",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                action = {
+                    Button(
+                        onClick = { showVoucherDialog = true },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    ) {
+                        Icon(Icons.Filled.ConfirmationNumber, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (sale.withholdingStatus == "RETENIDO_OK") "Editar Comprobante" else "Registrar Comprobante", fontSize = 12.sp)
+                    }
                 }
-            }
+            )
         }
     }
 
     if (showVoucherDialog) {
         var voucherNum by remember { mutableStateOf(sale.withholdingVoucherNumber) }
 
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { showVoucherDialog = false },
             title = { Text("Comprobante de Retención del Cliente", fontWeight = FontWeight.Bold) },
             text = {
@@ -340,7 +358,7 @@ fun CustomerWithholdingCard(sale: Sale, viewModel: PosViewModel) {
                         label = { Text("N° Comprobante SENIAT *") },
                         placeholder = { Text("Ej: 2026090001234") },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
                         shape = RoundedCornerShape(10.dp)
                     )
                 }
@@ -369,6 +387,7 @@ fun CustomerWithholdingCard(sale: Sale, viewModel: PosViewModel) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SupplierWithholdingCard(invoice: PurchaseInvoice, supplierName: String, viewModel: PosViewModel) {
     val context = LocalContext.current
@@ -384,93 +403,102 @@ fun SupplierWithholdingCard(invoice: PurchaseInvoice, supplierName: String, view
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(supplierName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("Factura Compra #${invoice.invoiceNumber}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                }
+            ResponsiveActionRow(
+                breakpoint = 330.dp,
+                verticalSpacing = 6.dp,
+                stackedActionAlignment = Alignment.Start,
+                content = {
+                    Column {
+                        Text(supplierName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        Text("Factura Compra #${invoice.invoiceNumber}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                action = {
+                    val (statusBg, statusText, statusLabel) = when (invoice.withholdingStatus) {
+                        "ENTERADO_SENIAT" -> Triple(Color(0xFFDCFCE7), Color(0xFF166534), "ENTERADO AL SENIAT ✓")
+                        else -> Triple(Color(0xFFFEF2F2), Color(0xFF991B1B), "PENDIENTE ENTERAR SENIAT ⚠️")
+                    }
 
-                // Status Badge
-                val (statusBg, statusText, statusLabel) = when (invoice.withholdingStatus) {
-                    "ENTERADO_SENIAT" -> Triple(Color(0xFFDCFCE7), Color(0xFF166534), "ENTERADO AL SENIAT ✓")
-                    else -> Triple(Color(0xFFFEF2F2), Color(0xFF991B1B), "PENDIENTE ENTERAR SENIAT ⚠️")
+                    Surface(shape = RoundedCornerShape(6.dp), color = statusBg) {
+                        Text(
+                            statusLabel,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = statusText,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
-
-                Surface(shape = RoundedCornerShape(6.dp), color = statusBg) {
-                    Text(
-                        statusLabel,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = statusText,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
+            )
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text("Fecha: ${dateFormat.format(Date(invoice.timestamp))}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Monto Total Factura: \$${String.format(Locale.US, "%.2f", invoice.totalAmount)} USD", style = MaterialTheme.typography.bodySmall)
+            ResponsiveActionRow(
+                breakpoint = 310.dp,
+                verticalSpacing = 4.dp,
+                stackedActionAlignment = Alignment.Start,
+                content = {
+                    Column {
+                        Text("Fecha: ${dateFormat.format(Date(invoice.timestamp))}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Monto Total Factura: \$${String.format(Locale.US, "%.2f", invoice.totalAmount)} USD", style = MaterialTheme.typography.bodySmall)
+                    }
+                },
+                action = {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Retención Practicada:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("\$${String.format(Locale.US, "%.2f", totalRetainedUsd)} USD", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626), style = MaterialTheme.typography.titleMedium)
+                    }
                 }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text("Retención Practicada:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("\$${String.format(Locale.US, "%.2f", totalRetainedUsd)} USD", fontWeight = FontWeight.Bold, color = Color(0xFFDC2626), style = MaterialTheme.typography.titleMedium)
-                }
-            }
+            )
 
             // Breakdown
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.SpaceAround
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text("Ret. IVA (${invoice.retencionIvaPercentage.toInt()}%): \$${String.format(Locale.US, "%.2f", invoice.retencionIvaUsd)} USD", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     Text("Ret. ISLR (${invoice.retencionIslrPercentage.toInt()}%): \$${String.format(Locale.US, "%.2f", invoice.retencionIslrUsd)} USD", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (invoice.withholdingVoucherNumber.isNotBlank()) "N° Comprobante Emitido: ${invoice.withholdingVoucherNumber}" else "Sin N° comprobante",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (invoice.withholdingStatus != "ENTERADO_SENIAT") {
-                    Button(
-                        onClick = { showEnteradoDialog = true },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF166534)),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Marcar Enterado en SENIAT", fontSize = 12.sp)
+            ResponsiveActionRow(
+                breakpoint = 340.dp,
+                verticalSpacing = 8.dp,
+                stackedActionAlignment = Alignment.End,
+                content = {
+                    Text(
+                        text = if (invoice.withholdingVoucherNumber.isNotBlank()) "N° Comprobante Emitido: ${invoice.withholdingVoucherNumber}" else "Sin N° comprobante",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                action = {
+                    if (invoice.withholdingStatus != "ENTERADO_SENIAT") {
+                        Button(
+                            onClick = { showEnteradoDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF166534)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                        ) {
+                            Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Marcar Enterado en SENIAT", fontSize = 12.sp)
+                        }
                     }
                 }
-            }
+            )
         }
     }
 
     if (showEnteradoDialog) {
-        AlertDialog(
+        KeyboardAwareAlertDialog(
             onDismissRequest = { showEnteradoDialog = false },
             title = { Text("Declaración / Enteramiento SENIAT", fontWeight = FontWeight.Bold) },
             text = {

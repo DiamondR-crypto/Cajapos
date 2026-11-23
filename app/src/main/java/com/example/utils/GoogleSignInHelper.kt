@@ -25,7 +25,7 @@ class GoogleSignInHelper(private val context: Context) {
         get() = try {
             context.getString(R.string.default_web_client_id)
         } catch (_: Exception) {
-            "201754889056-0s80cpc2n42pv076abqjvcm7pm8kgs7t.apps.googleusercontent.com"
+            ""
         }
 
     suspend fun signInWithGoogle(): Result<String> = withContext(Dispatchers.IO) {

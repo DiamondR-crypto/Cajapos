@@ -26,8 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.PosViewModel
 import com.example.utils.DiscoveredPrinterDevice
@@ -36,6 +34,7 @@ import com.example.utils.PrinterConnectionType
 import com.example.utils.ThermalPrinterManager
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PrinterScanDialog(
     viewModel: PosViewModel,
@@ -97,24 +96,18 @@ fun PrinterScanDialog(
 
     val isConfigured = viewModel.isPrinterConfigured()
 
-    Dialog(
+    KeyboardAwareDialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        maxWidth = 580.dp,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 6.dp,
+        modifier = Modifier.fillMaxHeight(0.92f)
     ) {
-        Surface(
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.92f)
-                .widthIn(max = 580.dp),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp
+                .fillMaxSize()
+                .padding(20.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
-            ) {
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -174,100 +167,102 @@ fun PrinterScanDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    if (isConfigured) Icons.Filled.CheckCircle else Icons.Filled.Search,
-                                    contentDescription = null,
-                                    tint = if (isConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = if (isConfigured)
-                                            "Impresora Activa: $currentPrinterName"
-                                        else
-                                            "Ninguna impresora configurada",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (isConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                        ResponsiveActionRow(
+                            breakpoint = 480.dp,
+                            content = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        if (isConfigured) Icons.Filled.CheckCircle else Icons.Filled.Search,
+                                        contentDescription = null,
+                                        tint = if (isConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
                                     )
-                                    val connLabel = when (currentPrinterConnectionType) {
-                                        "USB" -> "USB OTG Directo"
-                                        "BLUETOOTH_CLASSIC" -> "Bluetooth Clásico ESC/POS ($currentPrinterMac)"
-                                        else -> "Bluetooth BLE FunPrint ($currentPrinterMac)"
-                                    }
-                                    Text(
-                                        text = if (isConfigured)
-                                            "Modo: $connLabel • Papel: $currentPrinterPaperWidth"
-                                        else
-                                            "Conecta una impresora por USB o enciende tu Bluetooth",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            if (isConfigured) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    TextButton(
-                                        onClick = {
-                                            isTestingPrint = true
-                                            testPrintStatus = "Enviando prueba térmica..."
-                                            viewModel.printTestTicket(
-                                                context = context,
-                                                onStatus = { testPrintStatus = it },
-                                                onResult = { success, msg ->
-                                                    isTestingPrint = false
-                                                    testPrintStatus = msg
-                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                                }
-                                            )
-                                        },
-                                        enabled = !isTestingPrint
-                                    ) {
-                                        Text("Probar Térmica", fontSize = 11.sp)
-                                    }
-
-                                    TextButton(
-                                        onClick = {
-                                            isTestingPrint = true
-                                            testPrintStatus = "Probando protocolo fiscal ${viewModel.fiscalPrinterBrand.value}..."
-                                            viewModel.printFiscalTestTicket(
-                                                context = context,
-                                                onStatus = { testPrintStatus = it },
-                                                onResult = { success, msg ->
-                                                    isTestingPrint = false
-                                                    testPrintStatus = msg
-                                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                                }
-                                            )
-                                        },
-                                        enabled = !isTestingPrint
-                                    ) {
-                                        Text("Probar Fiscal", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                    }
-
-                                    TextButton(
-                                        onClick = {
-                                            viewModel.unlinkPrinter()
-                                            Toast.makeText(context, "Impresora desvinculada", Toast.LENGTH_SHORT).show()
-                                        },
-                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                                    ) {
-                                        Text("Desvincular", fontSize = 11.sp)
+                                    Column {
+                                        Text(
+                                            text = if (isConfigured)
+                                                "Impresora Activa: $currentPrinterName"
+                                            else
+                                                "Ninguna impresora configurada",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isConfigured) Color(0xFF059669) else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        val connLabel = when (currentPrinterConnectionType) {
+                                            "USB" -> "USB OTG Directo"
+                                            "BLUETOOTH_CLASSIC" -> "Bluetooth Clásico ESC/POS ($currentPrinterMac)"
+                                            else -> "Bluetooth BLE FunPrint ($currentPrinterMac)"
+                                        }
+                                        Text(
+                                            text = if (isConfigured)
+                                                "Modo: $connLabel • Papel: $currentPrinterPaperWidth"
+                                            else
+                                                "Conecta una impresora por USB o enciende tu Bluetooth",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
+                            },
+                            action = {
+                                if (isConfigured) {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        TextButton(
+                                            onClick = {
+                                                isTestingPrint = true
+                                                testPrintStatus = "Enviando prueba térmica..."
+                                                viewModel.printTestTicket(
+                                                    context = context,
+                                                    onStatus = { testPrintStatus = it },
+                                                    onResult = { _, msg ->
+                                                        isTestingPrint = false
+                                                        testPrintStatus = msg
+                                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                            },
+                                            enabled = !isTestingPrint
+                                        ) {
+                                            Text("Probar Térmica", fontSize = 11.sp)
+                                        }
+
+                                        TextButton(
+                                            onClick = {
+                                                isTestingPrint = true
+                                                testPrintStatus = "Probando protocolo fiscal ${viewModel.fiscalPrinterBrand.value}..."
+                                                viewModel.printFiscalTestTicket(
+                                                    context = context,
+                                                    onStatus = { testPrintStatus = it },
+                                                    onResult = { _, msg ->
+                                                        isTestingPrint = false
+                                                        testPrintStatus = msg
+                                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                                    }
+                                                )
+                                            },
+                                            enabled = !isTestingPrint
+                                        ) {
+                                            Text("Probar Fiscal", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        }
+
+                                        TextButton(
+                                            onClick = {
+                                                viewModel.unlinkPrinter()
+                                                Toast.makeText(context, "Impresora desvinculada", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                                        ) {
+                                            Text("Desvincular", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
                             }
-                        }
+                        )
 
                         if (testPrintStatus != null) {
                             Spacer(modifier = Modifier.height(4.dp))
@@ -291,9 +286,10 @@ fun PrinterScanDialog(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
 
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     val is58 = currentPrinterPaperWidth == "58mm"
                     val is80 = currentPrinterPaperWidth == "80mm"
@@ -311,8 +307,7 @@ fun PrinterScanDialog(
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
-                        },
-                        modifier = Modifier.weight(1f)
+                        }
                     )
 
                     FilterChip(
@@ -328,8 +323,7 @@ fun PrinterScanDialog(
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
-                        },
-                        modifier = Modifier.weight(1f)
+                        }
                     )
                 }
 
@@ -385,17 +379,17 @@ fun PrinterScanDialog(
                             Text("Marca / Protocolo Fiscal:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(4.dp))
                             val brands = listOf("The Factory HKA", "Bixolon Fiscal", "Dascom Fiscal", "Genérica Fiscal")
-                            Row(
+                            FlowRow(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 brands.forEach { brand ->
                                     val isSelected = fiscalPrinterBrand == brand
                                     FilterChip(
                                         selected = isSelected,
                                         onClick = { viewModel.setFiscalPrinterBrand(brand) },
-                                        label = { Text(brand, fontSize = 11.sp) },
-                                        modifier = Modifier.weight(1f)
+                                        label = { Text(brand, fontSize = 11.sp) }
                                     )
                                 }
                             }
@@ -406,10 +400,10 @@ fun PrinterScanDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Filtros de Tipo de Conexión (Tabs rápidos)
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     FilterChip(
                         selected = selectedFilterType == null,
@@ -439,51 +433,51 @@ fun PrinterScanDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Scan Action Bar
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            "Dispositivos detectados (${filteredDevices.size}):",
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        if (isScanning) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                ResponsiveActionRow(
+                    breakpoint = 360.dp,
+                    content = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                "Dispositivos detectados (${filteredDevices.size}):",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            if (isScanning) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            }
+                        }
+                    },
+                    action = {
+                        FilledTonalButton(
+                            onClick = {
+                                if (isScanning) {
+                                    printerManager.stopScan()
+                                } else {
+                                    if (hasPermission) {
+                                        printerManager.startScan()
+                                    } else {
+                                        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+                                        } else {
+                                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                                        }
+                                        permissionsLauncher.launch(required)
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                if (isScanning) Icons.Filled.Stop else Icons.Filled.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (isScanning) "Detener" else "Actualizar / Buscar", fontSize = 12.sp)
                         }
                     }
-
-                    FilledTonalButton(
-                        onClick = {
-                            if (isScanning) {
-                                printerManager.stopScan()
-                            } else {
-                                if (hasPermission) {
-                                    printerManager.startScan()
-                                } else {
-                                    val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-                                    } else {
-                                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-                                    }
-                                    permissionsLauncher.launch(required)
-                                }
-                            }
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                    ) {
-                        Icon(
-                            if (isScanning) Icons.Filled.Stop else Icons.Filled.Refresh,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (isScanning) "Detener" else "Actualizar / Buscar", fontSize = 12.sp)
-                    }
-                }
+                )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -689,12 +683,11 @@ fun PrinterScanDialog(
                 // Footer Actions
                 Button(
                     onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Guardar y Listo")
                 }
             }
-        }
     }
 }

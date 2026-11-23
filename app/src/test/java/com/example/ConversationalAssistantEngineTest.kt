@@ -1,7 +1,11 @@
 package com.example
 
+import com.example.data.local.CasheaSettlement
 import com.example.data.local.Customer
+import com.example.data.local.Expense
 import com.example.data.local.Product
+import com.example.data.local.Sale
+import com.example.data.local.SaleItem
 import com.example.data.repository.GeminiRepository
 import com.example.ui.assistant.ConversationalAssistantEngine
 import com.example.ui.assistant.PendingAssistantAction
@@ -9,6 +13,7 @@ import com.example.ui.assistant.ProcessResult
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.Calendar
 
 class ConversationalAssistantEngineTest {
 
@@ -265,5 +270,185 @@ class ConversationalAssistantEngineTest {
         assertTrue(formatted.contains("3.00"))
         assertTrue(formatted.contains("2.60"))
         assertTrue(formatted.contains("Margen mínimo configurado"))
+    }
+
+    @Test
+    fun processMessage_lastInvoiceAndDateRangeWithFollowUp_returnsItemsAndSpecificInvoice() = runBlocking {
+        val engine = createEngine()
+        val now = System.currentTimeMillis()
+        val sales = listOf(
+            Sale(
+                id = 101,
+                customerName = "María López",
+                customerDocument = "V-11111111",
+                timestamp = now - 3600_000L,
+                rateBcv = 50.0,
+                totalUsd = 10.0,
+                totalBs = 500.0,
+                paymentCashUsd = 10.0,
+                paymentMobileBs = 0.0,
+                paymentCardBs = 0.0
+            ),
+            Sale(
+                id = 102,
+                customerName = "Carlos Ruiz",
+                customerDocument = "V-22222222",
+                timestamp = now - 60_000L,
+                rateBcv = 50.0,
+                totalUsd = 25.0,
+                totalBs = 1250.0,
+                paymentCashUsd = 0.0,
+                paymentMobileBs = 0.0,
+                paymentCardBs = 0.0,
+                paymentCasheaUsd = 25.0
+            )
+        )
+        val saleItems = listOf(
+            SaleItem(id = 1, saleId = 101, productId = 1, productName = "Harina Pan", quantity = 5.0, priceUsd = 2.0),
+            SaleItem(id = 2, saleId = 102, productId = 2, productName = "Aceite Mazeite", quantity = 5.0, priceUsd = 5.0)
+        )
+
+        // 1. Last invoice detail
+        val lastResult = engine.processMessage(
+            rawText = "Detalle de la última factura",
+            currentPendingAction = null,
+            products = emptyList(),
+            suppliers = emptyList(),
+            sales = sales,
+            bcvRate = 50.0,
+            todaySalesTotalUsd = 35.0,
+            todaySalesTotalBs = 1750.0,
+            todaySalesCount = 2,
+            saleItems = saleItems
+        )
+        assertTrue(lastResult is ProcessResult.DirectReply)
+        val lastText = (lastResult as ProcessResult.DirectReply).text
+        assertTrue(lastText.contains("#102"))
+        assertTrue(lastText.contains("Carlos Ruiz"))
+        assertTrue(lastText.contains("Aceite Mazeite"))
+        assertTrue(lastText.contains("Cashea"))
+
+        // 2. Date summary (hoy) -> numbered list (#102 first, #101 second)
+        val listResult = engine.processMessage(
+            rawText = "Resumen de facturas de hoy",
+            currentPendingAction = null,
+            products = emptyList(),
+            suppliers = emptyList(),
+            sales = sales,
+            bcvRate = 50.0,
+            todaySalesTotalUsd = 35.0,
+            todaySalesTotalBs = 1750.0,
+            todaySalesCount = 2,
+            saleItems = saleItems
+        )
+        assertTrue(listResult is ProcessResult.DirectReply)
+        val listText = (listResult as ProcessResult.DirectReply).text
+        assertTrue(listText.contains("2 factura(s)"))
+        assertTrue(listText.contains("#102"))
+        assertTrue(listText.contains("#101"))
+
+        // 3. Follow-up inspection ("muéstrame la 2" -> invoice #101 María López with Harina Pan)
+        val followUpResult = engine.processMessage(
+            rawText = "muéstrame la 2",
+            currentPendingAction = null,
+            products = emptyList(),
+            suppliers = emptyList(),
+            sales = sales,
+            bcvRate = 50.0,
+            todaySalesTotalUsd = 35.0,
+            todaySalesTotalBs = 1750.0,
+            todaySalesCount = 2,
+            saleItems = saleItems
+        )
+        assertTrue(followUpResult is ProcessResult.DirectReply)
+        val followUpText = (followUpResult as ProcessResult.DirectReply).text
+        assertTrue(followUpText.contains("#101"))
+        assertTrue(followUpText.contains("María López"))
+        assertTrue(followUpText.contains("Harina Pan"))
+    }
+
+    @Test
+    fun processMessage_casheaInventoryValuationAndPriceUpdate_workLocally() = runBlocking {
+        val engine = createEngine()
+        val products = listOf(
+            Product(id = 1, code = "HAR-1", name = "Harina Pan", priceUsd = 1.50, costPriceUsd = 1.00, stock = 10.0, category = "Víveres")
+        )
+        val sales = listOf(
+            Sale(
+                id = 1,
+                customerName = "Ana",
+                customerDocument = "V-1",
+                timestamp = System.currentTimeMillis(),
+                rateBcv = 50.0,
+                totalUsd = 100.0,
+                totalBs = 5000.0,
+                paymentCashUsd = 0.0,
+                paymentMobileBs = 0.0,
+                paymentCardBs = 0.0,
+                paymentCasheaUsd = 100.0,
+                paymentCreditUsd = 40.0,
+                isCreditPaid = false
+            )
+        )
+        val settlements = listOf(
+            CasheaSettlement(
+                id = 1,
+                settlementDate = System.currentTimeMillis(),
+                grossAmountUsd = 60.0,
+                commissionPercentage = 10.0,
+                commissionAmountUsd = 6.0,
+                netReceivedUsd = 54.0
+            )
+        )
+
+        val casheaRes = engine.processMessage(
+            rawText = "Resumen de Cashea",
+            currentPendingAction = null,
+            products = products,
+            suppliers = emptyList(),
+            sales = sales,
+            bcvRate = 50.0,
+            todaySalesTotalUsd = 100.0,
+            todaySalesTotalBs = 5000.0,
+            todaySalesCount = 1,
+            casheaSettlements = settlements
+        )
+        assertTrue(casheaRes is ProcessResult.DirectReply)
+        val casheaText = (casheaRes as ProcessResult.DirectReply).text
+        assertTrue(casheaText.contains("100.00"))
+        assertTrue(casheaText.contains("40.00")) // pending debt
+        assertTrue(casheaText.contains("6.00"))  // commissions
+
+        val valRes = engine.processMessage(
+            rawText = "Valor del inventario",
+            currentPendingAction = null,
+            products = products,
+            suppliers = emptyList(),
+            sales = sales,
+            bcvRate = 50.0,
+            todaySalesTotalUsd = 0.0,
+            todaySalesTotalBs = 0.0,
+            todaySalesCount = 0
+        )
+        assertTrue(valRes is ProcessResult.DirectReply)
+        val valText = (valRes as ProcessResult.DirectReply).text
+        assertTrue(valText.contains("10.00")) // cost valuation
+        assertTrue(valText.contains("15.00")) // retail valuation
+
+        val priceRes = engine.processMessage(
+            rawText = "Cambia el precio de Harina Pan a $2.25",
+            currentPendingAction = null,
+            products = products,
+            suppliers = emptyList(),
+            sales = sales,
+            bcvRate = 50.0,
+            todaySalesTotalUsd = 0.0,
+            todaySalesTotalBs = 0.0,
+            todaySalesCount = 0
+        )
+        assertTrue(priceRes is ProcessResult.ProposeAction)
+        val priceAction = (priceRes as ProcessResult.ProposeAction).action as PendingAssistantAction.UpdateProductPriceAction
+        assertEquals(1, priceAction.productId)
+        assertEquals(2.25, priceAction.newPriceUsd, 0.001)
     }
 }

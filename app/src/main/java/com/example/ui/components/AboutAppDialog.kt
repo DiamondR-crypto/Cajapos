@@ -23,8 +23,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.R
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,22 +33,16 @@ fun AboutAppDialog(
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("General", "Módulos", "Roles", "Funcionamiento")
 
-    Dialog(
+    KeyboardAwareDialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        maxWidth = 640.dp,
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 10.dp,
+        modifier = Modifier.fillMaxHeight(0.88f)
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .fillMaxHeight(0.88f),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 10.dp,
-            shadowElevation = 20.dp
+        Column(
+            modifier = Modifier.fillMaxSize()
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
                 // Header Bar
                 Box(
                     modifier = Modifier
@@ -155,27 +147,29 @@ fun AboutAppDialog(
                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Footer
-                Row(
+                ResponsiveActionRow(
+                    breakpoint = 360.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "SmartPOS286 v2.5 • Edición Comercial",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Button(
-                        onClick = onDismissRequest,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Entendido")
+                    content = {
+                        Text(
+                            text = "SmartPOS286 v2.5 • Edición Comercial",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    action = {
+                        Button(
+                            onClick = onDismissRequest,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                        ) {
+                            Text("Entendido")
+                        }
                     }
-                }
+                )
             }
-        }
     }
 }
 
@@ -512,40 +506,42 @@ private fun ModuleDetailCard(
         tonalElevation = 2.dp
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(color.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
+            ResponsiveActionRow(
+                breakpoint = 360.dp,
+                verticalSpacing = 6.dp,
+                stackedActionAlignment = Alignment.Start,
+                content = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(color.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
+                        }
+                        Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                     }
-                    Text(title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                },
+                action = {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = color.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = badge,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = color
+                        )
+                    }
                 }
-
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = color.copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        text = badge,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = color
-                    )
-                }
-            }
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
