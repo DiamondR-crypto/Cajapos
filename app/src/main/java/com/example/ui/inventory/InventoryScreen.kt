@@ -337,6 +337,40 @@ fun InventoryScreen(viewModel: PosViewModel) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Exportar PDF", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
+
+                var isOrganizingInventory by remember { mutableStateOf(false) }
+
+                OutlinedButton(
+                    onClick = {
+                        if (!canEdit) {
+                            Toast.makeText(context, "Se requiere rol de Administrador o Supervisor", Toast.LENGTH_SHORT).show()
+                            return@OutlinedButton
+                        }
+                        isOrganizingInventory = true
+                        viewModel.smartOrganizeInventory { success, msg ->
+                            isOrganizingInventory = false
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    enabled = !isOrganizingInventory && products.isNotEmpty(),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFF6366F1).copy(alpha = 0.5f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF6366F1)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("smart_organize_inventory_button")
+                ) {
+                    if (isOrganizingInventory) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFF6366F1))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Organizando IA...", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Filled.AutoAwesome, contentDescription = "Organización inteligente con IA", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Organización IA", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
 
             OutlinedTextField(

@@ -1,3 +1,0 @@
-#!/bin/bash
-sed -i 's/import androidx.compose.material3.TopAppBar/import androidx.compose.material3.TopAppBar\nimport androidx.compose.material3.TopAppBarDefaults\nimport androidx.compose.material3.MaterialTheme/g' app/src/main/java/com/example/ui/MainApp.kt
-sed -i 's/TopAppBar(/TopAppBar(\n                colors = TopAppBarDefaults.topAppBarColors(\n                    containerColor = MaterialTheme.colorScheme.primary,\n                    titleContentColor = MaterialTheme.colorScheme.onPrimary,\n                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary\n                ),\n/g' app/src/main/java/com/example/ui/MainApp.kt

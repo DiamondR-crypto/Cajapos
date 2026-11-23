@@ -222,12 +222,11 @@ fun AssistantChatDialog(
     }
 
     val displayModelName = when (selectedModel) {
-        "gemini-3.5-flash-lite" -> "Gemini 3.5 Flash-Lite"
-        "gemini-3.8-flash" -> "Gemini 3.8 Flash"
-        "gemini-3.1-pro-preview" -> "Gemini 3.1 Pro"
-        else -> "Gemini $selectedModel"
+        "gemini-3.5-flash-lite", "gemini-3.5-flash" -> "Flash 3.5"
+        "gemini-3.1-pro-preview", "gemini-3.1-flash" -> "Flash 3.1"
+        else -> "Flash 3.5"
     }
-    val modelLabel = if (customApiKey.isNotBlank()) "$displayModelName (Propio)" else "$displayModelName (Gratis)"
+    val modelLabel = "$displayModelName (Gratis)"
 
     KeyboardAwareDialog(
         onDismissRequest = onDismiss,
@@ -287,7 +286,7 @@ fun AssistantChatDialog(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    "Asistente POS IA",
+                                    "Oli - Asistente Comercial IA",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,

@@ -13,11 +13,11 @@ private val DarkGlassColorScheme = darkColorScheme(
     onPrimaryContainer = Color.White,
     secondary = WinSecondary,
     onSecondary = Color.Black,
-    background = Color.Transparent, // Transparent so MainApp background shows through
+    background = WinBackground,
     onBackground = WinOnBackground,
-    surface = WinSurface.copy(alpha = 0.85f), // Acrylic glass effect
+    surface = WinSurface,
     onSurface = WinOnSurface,
-    surfaceVariant = WinSurfaceVariant.copy(alpha = 0.75f),
+    surfaceVariant = WinSurfaceVariant,
     onSurfaceVariant = WinOnSurface,
     error = WinError,
     onError = Color.White
@@ -26,17 +26,17 @@ private val DarkGlassColorScheme = darkColorScheme(
 private val LightGlassColorScheme = lightColorScheme(
     primary = Color(0xFF0284C7), // Sky Blue 600
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE0F2FE), // Sky 100
+    primaryContainer = Color(0xFFBAE6FD), // Sky 200
     onPrimaryContainer = Color(0xFF0369A1), // Sky 700
     secondary = Color(0xFF4F46E5), // Indigo 600
     onSecondary = Color.White,
-    background = Color.Transparent,
+    background = WinSkyBackground,
     onBackground = Color(0xFF0F172A), // Slate 900
-    surface = Color(0xFFFFFFFF).copy(alpha = 0.92f), // Clean white glass
+    surface = Color(0xFFFFFFFF), // Limpio blanco plano
     onSurface = Color(0xFF0F172A),
-    surfaceVariant = Color(0xFFF0F9FF), // Sky 50
-    onSurfaceVariant = Color(0xFF334155), // Slate 700
-    outline = Color(0xFFBAE6FD), // Sky 200
+    surfaceVariant = Color(0xFFBAE6FD), // Sky 200
+    onSurfaceVariant = Color(0xFF1E293B), // Slate 800
+    outline = Color(0xFF7DD3FC), // Sky 300
     error = WinError,
     onError = Color.White
 )

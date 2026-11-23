@@ -87,7 +87,7 @@ data class Candidate(
 interface GeminiApiService {
     @POST("v1beta/models/{model}:generateContent")
     suspend fun generateContent(
-        @Path("model") model: String = "gemini-3.5-flash-lite",
+        @Path("model") model: String = "gemini-2.5-flash",
         @Query("key") apiKey: String,
         @Body request: GenerateContentRequest
     ): GenerateContentResponse

@@ -1,1 +1,0 @@
-sed -i '/@Query("SELECT \* FROM sale_items WHERE saleId = :saleId")/i \    @Query("SELECT * FROM sale_items WHERE saleId IN (:saleIds)")\n    fun getItemsForSales(saleIds: List<Int>): Flow<List<SaleItem>>\n' app/src/main/java/com/example/data/local/SaleDao.kt

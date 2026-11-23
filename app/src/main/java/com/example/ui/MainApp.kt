@@ -58,6 +58,8 @@ import com.example.ui.navigation.MainModuleGroup
 import com.example.ui.navigation.ModulePermissions
 import com.example.ui.navigation.Screen
 import com.example.ui.pos.PosScreen
+import com.example.ui.theme.WinBackground
+import com.example.ui.theme.WinSkyBackground
 import com.example.ui.posterminal.PosTerminalRecordsScreen
 import com.example.ui.quotes.QuotesScreen
 import com.example.ui.settings.SettingsScreen
@@ -215,47 +217,14 @@ fun MainApp(viewModel: PosViewModel) {
     val appTheme by viewModel.appTheme.collectAsStateWithLifecycle()
     val isDark = (appTheme == "DARK")
 
-    // Windows 11 dynamic acrylic background
-    val win11Background = if (isDark) {
-        Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFF0F172A),
-                Color(0xFF1E1B4B),
-                Color(0xFF090D16)
-            )
-        )
-    } else {
-        Brush.verticalGradient(
-            colors = listOf(
-                Color(0xFFF8FAFC),
-                Color(0xFFE0F2FE),
-                Color(0xFFF0F9FF)
-            )
-        )
-    }
+    // Clean flat background: slightly lighter blue for dark theme, sky blue for light theme
+    val appBackgroundColor = if (isDark) WinBackground else WinSkyBackground
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(win11Background)
+            .background(appBackgroundColor)
     ) {
-        // Ambient soft glowing orbs (safe across all API levels)
-        Box(
-            modifier = Modifier
-                .size(450.dp)
-                .offset(x = (-150).dp, y = (-200).dp)
-                .clip(CircleShape)
-                .background(if (isDark) Color(0xFF6366F1).copy(alpha = 0.2f) else Color(0xFF38BDF8).copy(alpha = 0.25f))
-        )
-        Box(
-            modifier = Modifier
-                .size(500.dp)
-                .align(Alignment.BottomEnd)
-                .offset(x = 100.dp, y = 100.dp)
-                .clip(CircleShape)
-                .background(if (isDark) Color(0xFF38BDF8).copy(alpha = 0.15f) else Color(0xFF818CF8).copy(alpha = 0.2f))
-        )
-
         Row(modifier = Modifier.fillMaxSize()) {
             // Fully Hidable & Collapsible Hierarchical Navigation Rail
             AnimatedVisibility(

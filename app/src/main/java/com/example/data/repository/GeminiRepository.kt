@@ -347,9 +347,7 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
     fun hasValidApiKey(): Boolean = getEffectiveApiKeyOrNull() != null
 
     fun getEffectiveModel(): String {
-        val model = prefs?.geminiSelectedModel?.trim().orEmpty()
-        if (model.isNotBlank()) return model
-        return "gemini-3.5-flash-lite"
+        return "gemini-2.5-flash"
     }
 
     fun getLiveModel(): String = "models/gemini-2.5-flash-native-audio-preview-12-2025"
@@ -379,7 +377,7 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
         }
 
         return """
-            Eres el Asistente Inteligente en Tiempo Real de SmartPOS286, una aplicación POS de facturación, inventario y presupuestos.
+            Eres Oli, el Asistente Inteligente, Consultor Comercial y Experto en Tecnología y Negocios de SmartPOS286.
             Razona paso a paso antes de responder o llamar herramientas para elegir la acción exacta.
             Tasa oficial BCV vigente: $bcvRate Bs/USD.
 
@@ -404,7 +402,8 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
             3. CONFIRMACIÓN POR VOZ/CHAT: Si hay una acción pendiente y el usuario dice "sí", "confirma", "guárdalo" o "listo", llama a 'confirmCurrentAction'. Si dice "no" o "cancela", llama a 'cancelCurrentAction'.
             4. FACTURAS Y CONSULTAS POR FECHA: Usa 'getLastInvoiceDetail' para el detalle de la última factura, 'queryInvoicesByDate' para resúmenes por fecha o rango (numerando resultados), 'inspectListedInvoice' si el usuario pide ver una factura de esa lista anterior (ej. "la 2", "la de María"), y 'queryInvoice' para una factura por número.
             5. FINANZAS E INVENTARIO: Usa 'queryCasheaStatus' (deuda/comisiones de Cashea), 'queryPendingCredits' (cuentas por cobrar), 'queryExpensesSummary' (gastos), 'getInventoryValuation' (valor total de inventario), 'queryLowStock' (bajo stock), 'queryQuotes', 'queryCustomers', 'addStock', 'registerCustomer', 'registerExpense', 'registerPurchaseInvoice', 'updateBcvRate' o 'navigateToModule'.
-            6. REGLA ESTRICTA DE IDIOMA Y EXTENSIÓN: Responde SIEMPRE Y EXCLUSIVAMENTE EN ESPAÑOL. NUNCA respondas en inglés. En modo Live / voz (y chat), da respuestas CLARAS, DIRECTAS Y PUNTUALES sin relleno innecesario para que el flujo de trabajo sea rápido y cómodo.
+            6. LIBERTAD DE CONSULTA Y CONOCIMIENTO GENERAL UNIVERSAL: Tienes total libertad para ayudar al comerciante en CUALQUIER rubro o tipo de negocio (ej. tiendas de peces y acuarios sobre compatibilidad de especies y alimentación; restaurantes y pastelerías sobre recetas e ingredientes; talleres mecánicos sobre compatibilidad de repuestos; farmacias y tiendas de medicamentos sobre componentes y principios activos; ferreterías, ropa, librerías, etc.), además de especificaciones técnicas, electrónica, consejos comerciales, financieros, tributarios y normativas SENIAT. Ayuda al usuario con cualquier duda experta que tenga para que su negocio nunca necesite salir de la aplicación.
+            7. REGLA ESTRICTA DE IDIOMA Y EXTENSIÓN: Responde SIEMPRE Y EXCLUSIVAMENTE EN ESPAÑOL. NUNCA respondas en inglés. En modo Live / voz (y chat), da respuestas CLARAS, DIRECTAS Y PUNTUALES sin relleno innecesario para que el flujo de trabajo sea rápido y cómodo.
         """.trimIndent()
     }
 
@@ -711,6 +710,62 @@ class GeminiRepository(private val prefs: PreferencesManager? = null) {
                 Result.success(text)
             } else {
                 Result.failure(Exception("Gemini devolvió una respuesta vacía al analizar el ticket."))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun smartOrganizeInventoryProducts(
+        productsJsonList: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val apiKey = getEffectiveApiKeyOrNull()
+            ?: return@withContext Result.failure(Exception("No se ha configurado ninguna clave API de Gemini válida."))
+        val model = getEffectiveModel()
+
+        val prompt = """
+            Eres un experto en gestión de inventarios y organización comercial para cualquier tipo de negocio (comercio, ferretería, farmacia, restaurante, tienda de mascotas, taller, etc.).
+            Analiza la siguiente lista JSON de productos actuales del inventario.
+            Para CADA producto en la lista, debes:
+            1. Asignarle una CATEGORÍA comercial profesional, limpia y adecuada basada en su nombre (ej. "Víveres", "Bebidas", "Limpieza", "Electrónica", "Acuario", "Repuestos", "Medicamentos", "Lácteos", "Carnes", "Herramientas", "Alimentos", etc.).
+            2. Si el producto no tiene código (code está vacío, en blanco o es "S/N"), generarle un CÓDIGO ÚNICO alfanumérico limpio y profesional (ej. "PRD-001", "CAT-05", etc.). Si ya tiene un código válido, consérvalo.
+
+            Devuelve la respuesta ÚNICAMENTE en formato JSON válido como un arreglo de objetos JSON con esta estructura exacta (sin texto adicional ni formato markdown):
+            [
+              {
+                "id": 1,
+                "category": "Víveres",
+                "code": "HAR-001"
+              },
+              {
+                "id": 2,
+                "category": "Bebidas",
+                "code": "REF-002"
+              }
+            ]
+
+            Lista de productos actuales:
+            $productsJsonList
+        """.trimIndent()
+
+        val request = GenerateContentRequest(
+            contents = listOf(
+                Content(role = "user", parts = listOf(Part(text = prompt)))
+            ),
+            systemInstruction = Content(role = "system", parts = listOf(Part(text = "Eres un asistente experto en organización de inventarios. Devuelve estrictamente JSON válido.")))
+        )
+
+        try {
+            val response = service.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request
+            )
+            val text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text.orEmpty()
+            if (text.isNotBlank()) {
+                Result.success(text)
+            } else {
+                Result.failure(Exception("Respuesta vacía de IA."))
             }
         } catch (e: Exception) {
             Result.failure(e)

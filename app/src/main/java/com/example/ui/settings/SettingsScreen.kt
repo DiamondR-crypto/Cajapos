@@ -233,7 +233,8 @@ fun SettingsScreen(viewModel: PosViewModel) {
             modifier = Modifier
                 .padding(16.dp)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .imePadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // --- HEADER WITH NOTIFICATIONS BUBBLE ---
@@ -310,7 +311,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            if (appTheme == "DARK") "Tema Oscuro activo (Azul Slate / Vidrio Oscuro)" else "Tema Claro activo (Blanco / Azul Claro)",
+                            if (appTheme == "DARK") "Tema Oscuro activo (Azul Marino Plano)" else "Tema Claro activo (Azul Cielo Plano)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1257,19 +1258,11 @@ fun SettingsScreen(viewModel: PosViewModel) {
                 }
             }
 
-            // --- GEMINI AI ASSISTANT CONFIGURATION (ADMIN / SUPERVISOR) ---
-            val customGeminiApiKey by viewModel.geminiCustomApiKey.collectAsStateWithLifecycle()
-            val selectedGeminiModel by viewModel.geminiSelectedModel.collectAsStateWithLifecycle()
+            // --- ASISTENTE OLI & IA ADAPTATIVA ---
             val isLearningEnabled by viewModel.isGeminiLearningAiEnabled.collectAsStateWithLifecycle()
 
-            var editApiKey by remember(customGeminiApiKey) { mutableStateOf(customGeminiApiKey) }
-            var editModel by remember(selectedGeminiModel) { mutableStateOf(selectedGeminiModel) }
-            var isTestingGemini by remember { mutableStateOf(false) }
-            var geminiTestResult by remember { mutableStateOf<String?>(null) }
-            var geminiTestSuccess by remember { mutableStateOf(false) }
-
             Text(
-                "Asistente Conversacional y Gemini AI",
+                "Asistente Conversacional (Oli)",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1302,14 +1295,14 @@ fun SettingsScreen(viewModel: PosViewModel) {
                         }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "Motor de Inteligencia Artificial Gemini",
+                                "Asistente Comercial Oli",
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium
                             )
                             Text(
-                                if (editApiKey.isNotBlank()) "Modo Personalizado / API Key de Pago" else "Nivel Gratuito: Gemini 3.5 Flash-Lite Activo",
+                                "Versiones gratuitas activas: Flash 3.5 y Flash 3.1",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (editApiKey.isNotBlank()) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -1331,59 +1324,12 @@ fun SettingsScreen(viewModel: PosViewModel) {
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = "El asistente usa por defecto Gemini 3.5 Flash-Lite (el modelo gratuito más rápido de baja latencia). También puedes elegir Gemini 3.8 Flash o configurar tu API Key de pago.",
+                                text = "Oli utiliza automáticamente Flash 3.5 y Flash 3.1 en sus versiones gratuitas para ofrecerte la máxima velocidad, consultas de conocimiento general, especificaciones técnicas y asistencia comercial en tiempo real sin necesidad de configurar claves externas.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
-
-                    // Model Selection
-                    Text(
-                        "Modelo de Gemini:",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = editModel == "gemini-3.5-flash-lite",
-                            onClick = { editModel = "gemini-3.5-flash-lite" },
-                            label = { Text("3.5 Flash-Lite (Más Rápido)", fontSize = 11.5.sp) },
-                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
-                        )
-                        FilterChip(
-                            selected = editModel == "gemini-3.8-flash",
-                            onClick = { editModel = "gemini-3.8-flash" },
-                            label = { Text("3.8 Flash (Gratuito)", fontSize = 11.5.sp) },
-                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
-                        )
-                        FilterChip(
-                            selected = editModel == "gemini-3.1-pro-preview",
-                            onClick = { editModel = "gemini-3.1-pro-preview" },
-                            label = { Text("3.1 Pro (Avanzado)", fontSize = 11.5.sp) },
-                            modifier = Modifier.defaultMinSize(minHeight = 48.dp)
-                        )
-                    }
-
-                    // API Key Field
-                    OutlinedTextField(
-                        value = editApiKey,
-                        onValueChange = { editApiKey = it },
-                        label = { Text("API Key de Gemini (Opcional para cuentas de pago)") },
-                        placeholder = { Text("Dejar en blanco para usar la clave gratuita por defecto") },
-                        leadingIcon = { Icon(Icons.Filled.Key, contentDescription = null) },
-                        supportingText = {
-                            Text("Clave de Google AI Studio / Google Cloud Vertex.")
-                        },
-                        modifier = Modifier.fillMaxWidth().bringIntoViewOnFocus(),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true
-                    )
 
                     // IA de Aprendizaje Adaptativo Switch
                     Surface(
@@ -1437,80 +1383,6 @@ fun SettingsScreen(viewModel: PosViewModel) {
                             )
                         }
                     }
-
-                    if (geminiTestResult != null) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (geminiTestSuccess) Color(0xFF059669).copy(alpha = 0.15f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
-                            border = BorderStroke(1.dp, if (geminiTestSuccess) Color(0xFF059669) else MaterialTheme.colorScheme.error)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (geminiTestSuccess) Icons.Filled.CheckCircle else Icons.Filled.Error,
-                                    contentDescription = null,
-                                    tint = if (geminiTestSuccess) Color(0xFF059669) else MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = geminiTestResult ?: "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-
-                    ResponsivePair(
-                        breakpoint = 400.dp,
-                        horizontalSpacing = 10.dp,
-                        verticalSpacing = 10.dp,
-                        first = { mod ->
-                            OutlinedButton(
-                                onClick = {
-                                    isTestingGemini = true
-                                    geminiTestResult = null
-                                    viewModel.testGeminiConnection(editApiKey, editModel) { success, msg ->
-                                        isTestingGemini = false
-                                        geminiTestSuccess = success
-                                        geminiTestResult = msg
-                                    }
-                                },
-                                enabled = !isTestingGemini,
-                                modifier = mod.defaultMinSize(minHeight = 48.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                if (isTestingGemini) {
-                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Probando...")
-                                } else {
-                                    Icon(Icons.Filled.NetworkCheck, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Probar Conexión")
-                                }
-                            }
-                        },
-                        second = { mod ->
-                            Button(
-                                onClick = {
-                                    viewModel.setGeminiCustomApiKey(editApiKey)
-                                    viewModel.setGeminiSelectedModel(editModel)
-                                    Toast.makeText(context, "Configuración de Gemini guardada", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = mod.defaultMinSize(minHeight = 48.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4F46E5))
-                            ) {
-                                Icon(Icons.Filled.Save, contentDescription = null)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Guardar Cambios")
-                            }
-                        }
-                    )
                 }
             }
         }
@@ -1608,7 +1480,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
                 }
 
                 Text(
-                    "Cada 20 minutos se actualiza y sobrescribe el mismo archivo JSON encriptado (AES-256 GCM) en Firebase bajo tu cuenta de Google para mantener todos tus dispositivos sincronizados.",
+                    "Cada 20 minutos se actualiza y sobrescribe el mismo archivo encriptado (AES-256 GCM) en Firebase bajo tu cuenta de Google para mantener todos tus dispositivos sincronizados.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2017,25 +1889,26 @@ fun SettingsScreen(viewModel: PosViewModel) {
                                 )
                             }
                         }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                "Archivo Encriptado Anti-Manipulación",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.15f)
+                            ) {
                                 Text(
-                                    "JSON Encriptado Anti-Manipulación",
+                                    "AES-256 GCM",
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleMedium
+                                    color = Color(0xFF059669),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = Color(0xFF10B981).copy(alpha = 0.15f)
-                                ) {
-                                    Text(
-                                        "AES-256 GCM",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF059669),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
-                                }
                             }
                             Text(
                                 "Protege el inventario, facturación, gastos y clientes en un archivo inalterable desde el exterior pero portable entre dispositivos con la app.",
@@ -2165,7 +2038,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Se generará un archivo binario JSON cifrado e inmodificable que contiene todo el inventario, ventas, notas de entrega, clientes y facturación.",
+                        "Se generará un archivo cifrado e inmodificable que contiene todo el inventario, ventas, notas de entrega, clientes y facturación.",
                         style = MaterialTheme.typography.bodyMedium
                     )
 
@@ -2442,7 +2315,7 @@ fun SettingsScreen(viewModel: PosViewModel) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "Se descargará el último respaldo JSON encriptado desde Firebase para la cuenta ${googleAuthUserEmail.orEmpty()}, se verificará su integridad AES-256 GCM y se sincronizará este dispositivo.",
+                        "Se descargará el último respaldo encriptado desde Firebase para la cuenta ${googleAuthUserEmail.orEmpty()}, se verificará su integridad AES-256 GCM y se sincronizará este dispositivo.",
                         style = MaterialTheme.typography.bodyMedium
                     )
 

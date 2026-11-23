@@ -19,6 +19,11 @@ import com.example.ui.theme.MyApplicationTheme
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+
 class MainActivity : ComponentActivity() {
     
     private val viewModel: PosViewModel by viewModels {
@@ -41,7 +46,12 @@ class MainActivity : ComponentActivity() {
         setContent {
             val appTheme by viewModel.appTheme.collectAsStateWithLifecycle()
             MyApplicationTheme(darkTheme = (appTheme == "DARK")) {
-                MainApp(viewModel)
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    MainApp(viewModel)
+                }
             }
         }
     }

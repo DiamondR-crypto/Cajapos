@@ -110,13 +110,7 @@ class PosViewModel(
         listOf(
             AssistantChatMessage(
                 sender = AssistantSender.ASSISTANT,
-                text = "¡Hola! Soy tu asistente inteligente POS. Puedo ayudarte a:\n" +
-                        "• Crear **Presupuestos** y generar tickets para WhatsApp\n" +
-                        "• Consultar existencias, precios y clientes\n" +
-                        "• Registrar nuevos productos, gastos o facturas de proveedor\n" +
-                        "• Añadir existencias o actualizar la tasa BCV\n" +
-                        "• Activar **Gemini Live** (botón superior) para hablar fluido y corregir en tiempo real\n\n" +
-                        "Antes de aplicar cambios, te pediré confirmación con 'Sí' o 'No'. ¿Qué deseas hacer hoy?"
+                text = "¡Hola! Soy Oli, tu asistente comercial y consultor inteligente en tiempo real. Puedo ayudarte con todo lo relacionado al POS, inventario, facturación, presupuestos, notas de entrega, regulaciones SENIAT, así como también con consultas de conocimiento general, especificaciones técnicas (como compatibilidad de cargadores, tecnología) e información para que no tengas que salir de la aplicación. ¿Qué necesitas hoy?"
             )
         )
     )
@@ -3907,6 +3901,88 @@ class PosViewModel(
                 },
                 onFailure = { err ->
                     onResult(false, err.localizedMessage ?: "No se pudo recuperar el respaldo de Google.")
+                }
+            )
+        }
+    }
+
+    fun smartOrganizeInventory(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val productsList = repository.allProducts.firstOrNull().orEmpty()
+            if (productsList.isEmpty()) {
+                onResult(false, "El inventario está vacío.")
+                return@launch
+            }
+
+            val jsonArray = org.json.JSONArray()
+            productsList.forEach { p ->
+                val obj = org.json.JSONObject().apply {
+                    put("id", p.id)
+                    put("name", p.name)
+                    put("category", p.category)
+                    put("code", p.code)
+                }
+                jsonArray.put(obj)
+            }
+
+            val result = geminiRepository.smartOrganizeInventoryProducts(jsonArray.toString())
+            result.fold(
+                onSuccess = { rawResponse ->
+                    try {
+                        val cleaned = rawResponse
+                            .replace("```json", "", ignoreCase = true)
+                            .replace("```", "", ignoreCase = true)
+                            .trim()
+
+                        val parsedArray = org.json.JSONArray(cleaned)
+                        var updatedCategoriesCount = 0
+                        var generatedCodesCount = 0
+
+                        for (i in 0 until parsedArray.length()) {
+                            val item = parsedArray.getJSONObject(i)
+                            val id = item.optInt("id", -1)
+                            val newCategory = item.optString("category", "").trim()
+                            val newCode = item.optString("code", "").trim()
+
+                            val existing = productsList.find { it.id == id }
+                            if (existing != null) {
+                                var changed = false
+                                var catToSave = existing.category
+                                var codeToSave = existing.code
+
+                                if (newCategory.isNotBlank() && newCategory != existing.category) {
+                                    catToSave = newCategory
+                                    updatedCategoriesCount++
+                                    changed = true
+                                }
+                                if ((existing.code.isBlank() || existing.code == "S/N" || existing.code == "0") && newCode.isNotBlank()) {
+                                    codeToSave = newCode
+                                    generatedCodesCount++
+                                    changed = true
+                                } else if (existing.code.isBlank() && newCode.isBlank()) {
+                                    codeToSave = "PRD-${String.format(Locale.US, "%03d", existing.id)}"
+                                    generatedCodesCount++
+                                    changed = true
+                                }
+
+                                if (changed) {
+                                    val updatedProduct = existing.copy(category = catToSave, code = codeToSave)
+                                    repository.updateProduct(updatedProduct)
+                                    cloudSyncRepository.pushProduct(updatedProduct)
+                                }
+                            }
+                        }
+
+                        onResult(
+                            true,
+                            "¡Organización inteligente exitosa! Se actualizaron $updatedCategoriesCount categorías y se generaron $generatedCodesCount códigos automáticamente."
+                        )
+                    } catch (e: Exception) {
+                        onResult(false, "Error al procesar la respuesta de IA: ${e.localizedMessage}")
+                    }
+                },
+                onFailure = { err ->
+                    onResult(false, "Error de IA: ${err.localizedMessage ?: "No se pudo conectar con el servicio."}")
                 }
             )
         }

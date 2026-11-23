@@ -45,6 +45,8 @@ import com.example.data.local.User
 import com.example.ui.components.AboutAppDialog
 import com.example.ui.components.ResponsiveActionRow
 import com.example.ui.components.bringIntoViewOnFocus
+import com.example.ui.theme.WinBackground
+import com.example.ui.theme.WinSkyBackground
 import kotlinx.coroutines.launch
 
 @Composable
@@ -62,37 +64,18 @@ fun LoginScreen(viewModel: PosViewModel) {
 
     val scope = rememberCoroutineScope()
 
-    val win11Background = Brush.verticalGradient(
-        colors = listOf(
-            Color(0xFF0F172A),
-            Color(0xFF1E1B4B),
-            Color(0xFF090D16)
-        )
-    )
+    val appTheme by viewModel.appTheme.collectAsStateWithLifecycle()
+    val isDark = (appTheme == "DARK")
+    val loginBackgroundColor = if (isDark) WinBackground else WinSkyBackground
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(win11Background)
+            .background(loginBackgroundColor)
             .systemBarsPadding()
             .imePadding(),
         contentAlignment = Alignment.Center
     ) {
-        // Ambient soft glowing orbs for Windows 11 acrylic depth
-        Box(
-            modifier = Modifier
-                .size(320.dp)
-                .offset(x = (-130).dp, y = (-150).dp)
-                .clip(CircleShape)
-                .background(Color(0xFF6366F1).copy(alpha = 0.22f))
-        )
-        Box(
-            modifier = Modifier
-                .size(360.dp)
-                .offset(x = 150.dp, y = 170.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF38BDF8).copy(alpha = 0.18f))
-        )
 
         AnimatedVisibility(
             visible = true,
