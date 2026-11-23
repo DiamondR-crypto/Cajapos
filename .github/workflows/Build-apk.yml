@@ -18,8 +18,16 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Dar permisos a Gradlew y compilar APK
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
+
+      - name: Generar gradlew si falta y compilar APK
         run: |
+          if [ ! -f ./gradlew ]; then
+            gradle wrapper
+          fi
           chmod +x gradlew
           ./gradlew assembleDebug
 
