@@ -35,8 +35,11 @@ jobs:
           fi
           chmod +x gradlew
           ./gradlew assembleDebug -Pandroid.injected.signing.store.file=$PWD/app/debug.keystore -Pandroid.injected.signing.store.password=android -Pandroid.injected.signing.key.alias=androiddebugkey -Pandroid.injected.signing.key.password=android
-      - name: Subir APK generado
+      - name: Subir APK y Keystore generados
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+               app/build/outputs/apk/debug/*.apk
+               app/debug.keystore
+          
